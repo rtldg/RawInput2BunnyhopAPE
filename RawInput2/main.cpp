@@ -1,5 +1,7 @@
 #include <Windows.h>
 #include <iostream>
+#include <fstream>
+#include <string>
 #include <conio.h>
 #include <stdio.h>
 #include "utils.h"
@@ -204,6 +206,20 @@ BOOL IsProcessRunning(DWORD processID)
 	return ret == WAIT_TIMEOUT;
 }
 
+// https://stackoverflow.com/questions/10866311/getmessage-with-a-timeout/10866328#10866328
+BOOL GetMessageWithTimeout(MSG* msg, UINT to)
+{
+	BOOL res;
+	UINT_PTR timerId = SetTimer(NULL, NULL, to, NULL);
+	res = GetMessage(msg, NULL, 0, 0);
+	KillTimer(NULL, timerId);
+	if (!res)
+		return FALSE;
+	if (msg->message == WM_TIMER && msg->hwnd == NULL && msg->wParam == timerId)
+		return FALSE; //TIMEOUT! You could call SetLastError() or something...
+	return TRUE;
+}
+
 DWORD InjectionEntryPoint(DWORD processID)
 {
 	LoadLibraryA("VCRUNTIME140.dll");
@@ -224,6 +240,20 @@ DWORD InjectionEntryPoint(DWORD processID)
 
 	//ConMsg("Plat_FloatTime: %.5f\n", Plat_FloatTime());
 
+	BYTE nopBuffer[6] = { 0x90,0x90,0x90,0x90,0x90,0x90 };
+	BYTE jumpPredOriginalBytes[6];
+	auto jumpPred = reinterpret_cast<void*>(FindPattern("client.dll", "85 C0 8B 46 08 0F 84 ? FF FF FF F6 40 28 02 0F 85 ? FF FF FF") + 15);
+	memcpy(jumpPredOriginalBytes, jumpPred, 6);
+	DWORD jumpPredOriginalProtect;
+	VirtualProtect(jumpPred, 6, PAGE_EXECUTE_READWRITE, &jumpPredOriginalProtect);
+	memcpy(jumpPred, nopBuffer, 6);
+
+	auto pReleaseVideo = reinterpret_cast<void*>(FindPattern("engine.dll", "56 8B F1 8B 06 8B 40 ? FF D0 84 C0 75 ? 8B 06") + 12);
+	auto pFUCKD3D9 = reinterpret_cast<void*>(FindPattern("d3d9.dll", "0F 84 ? ? ? ? 6A 07 FF B3"));
+	DWORD pReleaseVideoOriginalProtect, pFUCKD3D9OriginalProtect;
+	VirtualProtect(pReleaseVideo, 1, PAGE_EXECUTE_READWRITE, &pReleaseVideoOriginalProtect);
+	VirtualProtect(pFUCKD3D9, 2, PAGE_EXECUTE_READWRITE, &pFUCKD3D9OriginalProtect);
+
 	DetourTransactionBegin();
 	DetourUpdateThread(GetCurrentThread());
 	DetourAttach(&(PVOID&)oGetRawMouseAccumulators, Hooked_GetRawMouseAccumulators);
@@ -233,11 +263,54 @@ DWORD InjectionEntryPoint(DWORD processID)
 	DetourAttach(&(PVOID&)oIn_SetSampleTime, Hooked_IN_SetSampleTime);
 	DetourTransactionCommit();
 
+	bool jumpPredPatched = true;
+	bool fullScreenPatched = false;
+
+	RegisterHotKey(NULL, 1, MOD_NOREPEAT, VK_F5);
+	RegisterHotKey(NULL, 2, MOD_NOREPEAT, VK_F6);
+
 	while (IsProcessRunning(processID))
 	//while(FindWindowA(NULL, "CS:S RawInput2") != 0)
 	{
-		Sleep(1000);
+		MSG msg;
+		if (GetMessageWithTimeout(&msg, 200))
+		{
+			if (msg.message == WM_HOTKEY && msg.wParam == 1)
+			{
+				if (jumpPredPatched)
+					memcpy(jumpPred, jumpPredOriginalBytes, 6);
+				else
+					memcpy(jumpPred, nopBuffer, 6);
+				jumpPredPatched = !jumpPredPatched;
+			}
+			else if (msg.message == WM_HOTKEY && msg.wParam == 2)
+			{
+				if (fullScreenPatched)
+				{
+					memcpy(pReleaseVideo, "\x75", 1);
+					memcpy(pFUCKD3D9, "\x0F\x84", 2);
+				}
+				else
+				{
+					memcpy(pReleaseVideo, "\xEB", 1);
+					memcpy(pFUCKD3D9, "\x90\xE9", 2);
+				}
+				fullScreenPatched = !fullScreenPatched;
+			}
+		}
+
+		//Sleep(55);
 	}
+
+	UnregisterHotKey(NULL, 1);
+	UnregisterHotKey(NULL, 2);
+
+	memcpy(pReleaseVideo, "\x75", 1);
+	memcpy(pFUCKD3D9, "\x0F\x84", 2);
+	VirtualProtect(pReleaseVideo, 1, pReleaseVideoOriginalProtect, &pReleaseVideoOriginalProtect);
+	VirtualProtect(pFUCKD3D9, 2, pFUCKD3D9OriginalProtect, &pFUCKD3D9OriginalProtect);
+	memcpy(jumpPred, jumpPredOriginalBytes, 6);
+	VirtualProtect(jumpPred, 6, jumpPredOriginalProtect, &jumpPredOriginalProtect);
 
 	DetourTransactionBegin();
 	DetourUpdateThread(GetCurrentThread());
@@ -302,21 +375,54 @@ void PEInjector(DWORD processID, DWORD Func(DWORD))
 	CreateRemoteThread(targetProcess, NULL, 0, (LPTHREAD_START_ROUTINE)((DWORD_PTR)Func + deltaImageBase), (LPVOID)GetCurrentProcessId(), 0, NULL);
 }
 
+// Assumes the libraryfolders.vdf is "well formed"
+std::string GetCSSPath()
+{
+	HKEY key;
+	RegOpenKeyA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Valve\\Steam", &key);
+	char buf[256];
+	DWORD size = sizeof(buf) / sizeof(buf[0]);
+	RegQueryValueExA(key, "InstallPath", 0, NULL, (BYTE*)buf, &size);
+	auto steampath = std::string(buf);
+
+	std::ifstream libraryfolders(steampath + "\\steamapps\\libraryfolders.vdf");
+	std::string line, css_path, library_path;
+	while (std::getline(libraryfolders, line))
+	{
+#define PPPPP "\t\t\"path\"\t\t\""
+		if (line.rfind(PPPPP, 0) == 0)
+		{
+			library_path = line.substr(sizeof(PPPPP) - 1, line.size() - sizeof(PPPPP));
+		}
+		if (line.rfind("\t\t\t\"240\"", 0) == 0)
+		{
+			css_path = library_path;
+			break;
+		}
+	}
+	if (css_path != "")
+		css_path += "\\steamapps\\common\\Counter-Strike Source\\";
+	return css_path;
+}
+
 //Сredits: https://github.com/alkatrazbhop/BunnyhopAPE
 int main()
 {
-	SetConsoleTitle("CS:S RawInput2");
+	SetConsoleTitle("CS:S RawInput2 + BunnyhopAPE");
 
-	DWORD processID;
-	printf("Waiting for CS:S to start...");
-	while (1)
-	{
-		processID = GetPIDByName("hl2.exe");
-		if (processID) break;
-		Sleep(1000);
-	}
+	auto css_path = GetCSSPath();
+	auto css_exe = css_path + "hl2.exe";
+#if 1
+	char launch_options[] = "-steam -game cstrike -insecure -novid -console";
+#else
+	char launch_options[] = "-steam -game cstrike -insecure -novid";
+#endif
+	PROCESS_INFORMATION pi = {};
+	STARTUPINFOA si = {};
+	CreateProcessA(css_exe.c_str(), launch_options, NULL, NULL, FALSE, 0, NULL, css_path.c_str(), &si, &pi);
 
-	HANDLE g_hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processID);
+	HANDLE g_hProcess = pi.hProcess;
+	DWORD processID = pi.dwProcessId;
 
 	while (1)
 	{
@@ -331,16 +437,21 @@ int main()
 	ReadProcessMemory(g_hProcess, pCmdLine, &pCmdLine, sizeof(DWORD), NULL);
 	ReadProcessMemory(g_hProcess, pCmdLine, &pCmdLine, sizeof(DWORD), NULL);
 	ReadProcessMemory(g_hProcess, pCmdLine, cmdLine, 255, NULL);
-	CloseHandle(g_hProcess);
 	if (!strstr(cmdLine, " -insecure"))
 		Error("-insecure key is missing!");
 
 	system("cls");
-	printf("Set \"m_rawinput 2\" in game for it to take effect.\n");
+	printf("Set \"m_rawinput 2\" in game for it to take effect\n\nPress F5 to toggle BunnyhopAPE autobhop prediction (on by default)\nPress F6 to toggle the fullscreen hook (you probably don't want this)\n");
 
 	PEInjector(processID, InjectionEntryPoint);
 
-
-	while (_getch() != VK_RETURN) {}
-	return false;
+	while (1)
+	{
+		if (WaitForSingleObject(g_hProcess, 0) != WAIT_TIMEOUT)
+			return 0;
+		if (_kbhit() && _getch() != VK_RETURN)
+			return 0;
+		Sleep(500);
+	}
+	return 0;
 }
