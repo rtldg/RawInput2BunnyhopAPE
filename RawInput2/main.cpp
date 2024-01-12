@@ -220,6 +220,12 @@ BOOL GetMessageWithTimeout(MSG* msg, UINT to)
 	return TRUE;
 }
 
+void RecvProxy_ZeroToVector(const void* fuck1, void* fuck2, float* fuck3)
+{
+	for (int i = 0; i < 3; i++)
+		fuck3[i] = 0.0;
+}
+
 DWORD InjectionEntryPoint(DWORD processID)
 {
 	LoadLibraryA("VCRUNTIME140.dll");
@@ -254,6 +260,17 @@ DWORD InjectionEntryPoint(DWORD processID)
 	VirtualProtect(pReleaseVideo, 1, PAGE_EXECUTE_READWRITE, &pReleaseVideoOriginalProtect);
 	VirtualProtect(pFUCKD3D9, 2, PAGE_EXECUTE_READWRITE, &pFUCKD3D9OriginalProtect);
 
+	BYTE prleNew[6] = { 0x5e,   0x5f,   0x5d,   0xc2, 0x04, 0x00 }; // pop esi ; pop edi ; pop ebp ; ret 0x4
+	BYTE prleOriginal[6];
+	auto pFuckPlayerRoughLandingEffects = reinterpret_cast<void*>(FindPattern("client.dll", "55 8B EC F3 0F 10 45 ? 0F 2F 05 ? ? ? ? 57") + 73 /* after ->PlayStepSound */);
+	memcpy(prleOriginal, pFuckPlayerRoughLandingEffects, 6);
+	DWORD pFuckPlayerRoughtLandingEffectsOriginalProtect;
+	VirtualProtect(pFuckPlayerRoughLandingEffects, 2, PAGE_EXECUTE_READWRITE, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
+	memcpy(pFuckPlayerRoughLandingEffects, prleNew, 6);
+	auto m_vecPunchAngle_RecvProp = (void**)((DWORD)GetModuleHandleA("client.dll") + 0x4c8c40);
+	auto m_vecPunchAngle_RecvProp_Original = m_vecPunchAngle_RecvProp[8];
+	m_vecPunchAngle_RecvProp[8] = RecvProxy_ZeroToVector;
+
 	DetourTransactionBegin();
 	DetourUpdateThread(GetCurrentThread());
 	DetourAttach(&(PVOID&)oGetRawMouseAccumulators, Hooked_GetRawMouseAccumulators);
@@ -265,9 +282,11 @@ DWORD InjectionEntryPoint(DWORD processID)
 
 	bool jumpPredPatched = true;
 	bool fullScreenPatched = false;
+	bool fuckViewpunch = true;
 
 	RegisterHotKey(NULL, 1, MOD_NOREPEAT, VK_F5);
 	RegisterHotKey(NULL, 2, MOD_NOREPEAT, VK_F6);
+	RegisterHotKey(NULL, 3, MOD_NOREPEAT, VK_F7);
 
 	while (IsProcessRunning(processID))
 	//while(FindWindowA(NULL, "CS:S RawInput2") != 0)
@@ -297,6 +316,17 @@ DWORD InjectionEntryPoint(DWORD processID)
 				}
 				fullScreenPatched = !fullScreenPatched;
 			}
+			else if (msg.message == WM_HOTKEY && msg.wParam == 3)
+			{
+				if (fuckViewpunch) {
+					memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, 6);
+					m_vecPunchAngle_RecvProp[8] = m_vecPunchAngle_RecvProp_Original;
+				} else {
+					memcpy(pFuckPlayerRoughLandingEffects, prleNew, 6);
+					m_vecPunchAngle_RecvProp[8] = RecvProxy_ZeroToVector;
+				}
+				fuckViewpunch = !fuckViewpunch;
+			}
 		}
 
 		//Sleep(55);
@@ -304,7 +334,11 @@ DWORD InjectionEntryPoint(DWORD processID)
 
 	UnregisterHotKey(NULL, 1);
 	UnregisterHotKey(NULL, 2);
+	UnregisterHotKey(NULL, 3);
 
+	memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, 6);
+	m_vecPunchAngle_RecvProp[8] = m_vecPunchAngle_RecvProp_Original;
+	VirtualProtect(pFuckPlayerRoughLandingEffects, 6, pFuckPlayerRoughtLandingEffectsOriginalProtect, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
 	memcpy(pReleaseVideo, "\x75", 1);
 	memcpy(pFUCKD3D9, "\x0F\x84", 2);
 	VirtualProtect(pReleaseVideo, 1, pReleaseVideoOriginalProtect, &pReleaseVideoOriginalProtect);
@@ -441,7 +475,7 @@ int main()
 		Error("-insecure key is missing!");
 
 	system("cls");
-	printf("Set \"m_rawinput 2\" in game for it to take effect\n\nPress F5 to toggle BunnyhopAPE autobhop prediction (on by default)\nPress F6 to toggle the fullscreen hook (you probably don't want this)\n");
+	printf("Set \"m_rawinput 2\" in game for it to take effect\n\nPress F5 to toggle BunnyhopAPE autobhop prediction (on by default)\nPress F6 to toggle the fullscreen hook (you probably don't want this)\nPress F7 to toggle the viewpunch remover (e.g. from fall-damage) (on by default)\n");
 
 	PEInjector(processID, InjectionEntryPoint);
 
