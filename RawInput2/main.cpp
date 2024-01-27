@@ -409,6 +409,17 @@ void PEInjector(DWORD processID, DWORD Func(DWORD))
 	CreateRemoteThread(targetProcess, NULL, 0, (LPTHREAD_START_ROUTINE)((DWORD_PTR)Func + deltaImageBase), (LPVOID)GetCurrentProcessId(), 0, NULL);
 }
 
+// https://stackoverflow.com/a/14678800
+std::string ReplaceString(std::string subject, const std::string& search,
+	const std::string& replace) {
+	size_t pos = 0;
+	while ((pos = subject.find(search, pos)) != std::string::npos) {
+		subject.replace(pos, search.length(), replace);
+		pos += replace.length();
+	}
+	return subject;
+}
+
 // Assumes the libraryfolders.vdf is "well formed"
 std::string GetCSSPath()
 {
@@ -418,6 +429,7 @@ std::string GetCSSPath()
 	DWORD size = sizeof(buf) / sizeof(buf[0]);
 	RegQueryValueExA(key, "InstallPath", 0, NULL, (BYTE*)buf, &size);
 	auto steampath = std::string(buf);
+	printf("steampath = %s\n", steampath.c_str());
 
 	std::ifstream libraryfolders(steampath + "\\steamapps\\libraryfolders.vdf");
 	std::string line, css_path, library_path;
@@ -427,6 +439,7 @@ std::string GetCSSPath()
 		if (line.rfind(PPPPP, 0) == 0)
 		{
 			library_path = line.substr(sizeof(PPPPP) - 1, line.size() - sizeof(PPPPP));
+			library_path = ReplaceString(library_path, "\\\\", "\\");
 		}
 		if (line.rfind("\t\t\t\"240\"", 0) == 0)
 		{
@@ -445,6 +458,7 @@ int main()
 	SetConsoleTitle("CS:S RawInput2 + BunnyhopAPE");
 
 	auto css_path = GetCSSPath();
+	printf("css path  = %s\n\n", css_path.c_str());
 	auto css_exe = css_path + "hl2.exe";
 #if 1
 	char launch_options[] = "-steam -game cstrike -insecure -novid -console";
@@ -453,7 +467,24 @@ int main()
 #endif
 	PROCESS_INFORMATION pi = {};
 	STARTUPINFOA si = {};
-	CreateProcessA(css_exe.c_str(), launch_options, NULL, NULL, FALSE, 0, NULL, css_path.c_str(), &si, &pi);
+
+	if (!CreateProcessA(css_exe.c_str(), launch_options, NULL, NULL, FALSE, 0, NULL, css_path.c_str(), &si, &pi))
+	{
+		auto err = GetLastError();
+		char* buf;
+		FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&buf, 0, NULL);
+
+		printf("CreateProcessA failed (0x%x): %s\n", err, buf);
+
+		while (1)
+		{
+			if (_kbhit() && _getch() != VK_RETURN)
+				return 0;
+			Sleep(500);
+		}
+
+		return 1;
+	}
 
 	HANDLE g_hProcess = pi.hProcess;
 	DWORD processID = pi.dwProcessId;
@@ -465,16 +496,7 @@ int main()
 		Sleep(1000);
 	}
 
-	DWORD pHL = (DWORD)GetModuleHandleExtern(processID, "hl2.exe");
-	DWORD* pCmdLine = (DWORD*)(FindPatternEx(g_hProcess, pHL, 0x4000, (PBYTE)"\x85\xC0\x79\x08\x6A\x08", "xxxxxx") - 0x13);
-	char* cmdLine = new char[255];
-	ReadProcessMemory(g_hProcess, pCmdLine, &pCmdLine, sizeof(DWORD), NULL);
-	ReadProcessMemory(g_hProcess, pCmdLine, &pCmdLine, sizeof(DWORD), NULL);
-	ReadProcessMemory(g_hProcess, pCmdLine, cmdLine, 255, NULL);
-	if (!strstr(cmdLine, " -insecure"))
-		Error("-insecure key is missing!");
-
-	system("cls");
+	//system("cls");
 	printf("Set \"m_rawinput 2\" in game for it to take effect\n\nPress F5 to toggle BunnyhopAPE autobhop prediction (on by default)\nPress F6 to toggle the fullscreen hook (you probably don't want this)\nPress F7 to toggle the viewpunch remover (e.g. from fall-damage) (on by default)\n");
 
 	PEInjector(processID, InjectionEntryPoint);
