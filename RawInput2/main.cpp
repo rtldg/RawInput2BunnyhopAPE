@@ -542,17 +542,19 @@ std::string ReplaceString(std::string subject, const std::string& search,
 	return subject;
 }
 
-// Assumes the libraryfolders.vdf is "well formed"
-std::string GetCSSPath()
+std::string GetSteamPath()
 {
 	HKEY key;
 	RegOpenKeyA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Valve\\Steam", &key);
 	char buf[256];
 	DWORD size = sizeof(buf) / sizeof(buf[0]);
 	RegQueryValueExA(key, "InstallPath", 0, NULL, (BYTE*)buf, &size);
-	auto steampath = std::string(buf);
-	printf("steampath = %s\n", steampath.c_str());
+	return std::string(buf);
+}
 
+// Assumes the libraryfolders.vdf is "well formed"
+std::string GetCSSPath(std::string const & steampath)
+{
 	std::ifstream libraryfolders(steampath + "\\steamapps\\libraryfolders.vdf");
 	std::string line, css_path, library_path;
 	while (std::getline(libraryfolders, line))
@@ -574,23 +576,56 @@ std::string GetCSSPath()
 	return css_path;
 }
 
+std::string GetSteamID3()
+{
+	HKEY key;
+	RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Valve\\Steam\\ActiveProcess", &key);
+	DWORD steamid3, size = sizeof(steamid3);
+	RegQueryValueExA(key, "ActiveUser", 0, NULL, (BYTE*)&steamid3, &size);
+	return std::to_string(steamid3);
+}
+
+// Assumes "X:\Program Files (x86)\Steam\userdata\STEAMIDHERE\config\localconfig.vdf" is "well formed"
+std::string GetCSSLaunchOptions(std::string const & steampath, std::string const & steamid3)
+{
+	std::ifstream localconfig(steampath + "\\userdata\\" + steamid3 + "\\config\\localconfig.vdf");
+	std::string line;
+	bool in_css = false;
+	while (std::getline(localconfig, line))
+	{
+		if (line.rfind("\t\t\t\t\t\"240\"", 0) == 0)
+			in_css = true;
+#define LLLLL "\t\t\t\t\t\t\"LaunchOptions\"\t\t\""
+		if (line.rfind(LLLLL, 0) == 0)
+		{
+			line = line.substr(sizeof(LLLLL) - 1, line.size() - sizeof(LLLLL));
+			line = ReplaceString(line, "\\\\", "\\");
+			return line;
+		}
+	}
+	return "";
+}
+
 //Сredits: https://github.com/alkatrazbhop/BunnyhopAPE
 int main()
 {
-	SetConsoleTitle("CS:S RawInput2 + BunnyhopAPE");
+	SetConsoleTitle("RawInput2BunnyhopAPE");
 
-	auto css_path = GetCSSPath();
+	auto steamid3 = GetSteamID3();
+	printf("steamid3  = %s\n", steamid3.c_str());
+	auto steam_path = GetSteamPath();
+	printf("steampath = %s\n", steam_path.c_str());
+	auto launch_options = GetCSSLaunchOptions(steam_path, steamid3);
+	launch_options = "-steam -game cstrike -insecure -novid -console   " + launch_options;
+	printf("launchopt = %s\n", launch_options.c_str());
+	auto css_path = GetCSSPath(steam_path);
 	printf("css path  = %s\n\n", css_path.c_str());
 	auto css_exe = css_path + "hl2.exe";
-#if 1
-	char launch_options[] = "-steam -game cstrike -insecure -novid -console";
-#else
-	char launch_options[] = "-steam -game cstrike -insecure -novid";
-#endif
+
 	PROCESS_INFORMATION pi = {};
 	STARTUPINFOA si = {};
 
-	if (!CreateProcessA(css_exe.c_str(), launch_options, NULL, NULL, FALSE, 0, NULL, css_path.c_str(), &si, &pi))
+	if (!CreateProcessA(css_exe.c_str(), (char*)launch_options.c_str(), NULL, NULL, FALSE, 0, NULL, css_path.c_str(), &si, &pi))
 	{
 		auto err = GetLastError();
 		char* buf;
