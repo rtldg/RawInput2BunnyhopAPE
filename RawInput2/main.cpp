@@ -35,6 +35,13 @@ DownloadCache_PersistToDiskFn oDownloadCache_PersistToDisk;
 DecompressBZipToDiskFn oDecompressBZipToDisk;
 BZ2_bzreadFn oBZ2_bzread;
 
+// NOTE: __thiscall for the typedefs so the original function is called correctly.
+//       __fastcall for the hook function because... reasons?
+//         TODO check if we can just thiscall those...
+//       thiscall = ecx, then stack
+//       fastcall = ecx, edx, then stack. That's why the fastcall funcs have a void* edx argument.
+//         (so we have the rest of the parameters be on stack and then ignore edx)
+
 typedef void(__cdecl* ConMsgFn)(const char*, ...);
 ConMsgFn ConMsg;
 
@@ -256,7 +263,7 @@ void __fastcall Hooked_DownloadCache_PersistToDisk(void* thisptr, void* edx, voi
 {
 	oCEngineVGui_UpdateCustomProgressBar(0.0, L"Writing to disk...");
 	oDownloadCache_PersistToDisk(thisptr, req);
-	oCEngineVGui_UpdateCustomProgressBar(100.0, L"Done..."); // Crashes if you put this here :( EDIT: Not anymore? wtf is going on
+	oCEngineVGui_UpdateCustomProgressBar(100.0, L"Done...");
 }
 
 static int totalBz2, bz2Iter;
