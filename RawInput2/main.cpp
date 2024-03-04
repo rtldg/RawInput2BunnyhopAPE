@@ -595,13 +595,20 @@ std::string GetCSSLaunchOptions(std::string const & steampath, std::string const
 	{
 		if (line.rfind("\t\t\t\t\t\"240\"", 0) == 0)
 			in_css = true;
+		if (line.rfind("\t\t\t\t\t}", 0) == 0)
+			in_css = false;
 #define LLLLL "\t\t\t\t\t\t\"LaunchOptions\"\t\t\""
-		if (line.rfind(LLLLL, 0) == 0)
+		if (in_css && line.rfind(LLLLL, 0) == 0)
 		{
 			line = line.substr(sizeof(LLLLL) - 1, line.size() - sizeof(LLLLL));
 			line = ReplaceString(line, "\\\\", "\\");
 			return line;
 		}
+#if 1
+		// You're not going to believe it but this section is required to not crash when spawning in.
+		for (int i = 0; i < 5; i++)
+			(void)GetCurrentProcessId();
+#endif
 	}
 	return "";
 }
