@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include <Windows.h>
 #include <iostream>
 #include <fstream>
@@ -22,6 +23,17 @@ GetAccumulatedMouseDeltasAndResetAccumulatorsFn oGetAccumulatedMouseDeltasAndRes
 ControllerMoveFn oControllerMove;
 In_SetSampleTimeFn oIn_SetSampleTime;
 
+typedef void(__thiscall* CDownloadManager_UpdateProgressBarFn)(void*);
+typedef void(__stdcall* CEngineVGui_UpdateCustomProgressBarFn)(float, const wchar_t*);
+typedef void(__thiscall* DownloadCache_PersistToDiskFn)(void*, void*);
+typedef bool(__stdcall* DecompressBZipToDiskFn)(const char*, const char*, char*, int);
+typedef int(__stdcall* BZ2_bzreadFn)(int, int, int);
+
+CDownloadManager_UpdateProgressBarFn oCDownloadManager_UpdateProgressBar;
+CEngineVGui_UpdateCustomProgressBarFn oCEngineVGui_UpdateCustomProgressBar;
+DownloadCache_PersistToDiskFn oDownloadCache_PersistToDisk;
+DecompressBZipToDiskFn oDecompressBZipToDisk;
+BZ2_bzreadFn oBZ2_bzread;
 
 typedef void(__cdecl* ConMsgFn)(const char*, ...);
 ConMsgFn ConMsg;
@@ -198,6 +210,88 @@ void __fastcall Hooked_IN_SetSampleTime(void* thisptr, void* edx, float frametim
 	oIn_SetSampleTime(thisptr, frametime);
 }
 
+static int downloadBytesCurrent, downloadBytesTotal, downloadShowBytes;
+void __fastcall Hooked_CDownloadManager_UpdateProgressBar(void* thisptr, void* edx)
+{
+	struct request_t {
+		char _pad0;
+		char bz2;
+		char http;
+		char _pad3;
+		char _pad4[0x614];
+		int total;
+		int current;
+	};
+	struct dlman_t {
+		char _pre[0x18];
+		struct request_t* req;
+	};
+	struct dlman_t* man = (struct dlman_t*)thisptr;
+
+	if (!man->req || !man->req->http) return;
+
+	downloadBytesCurrent = man->req->current;
+	downloadBytesTotal = man->req->total;
+	downloadShowBytes = 1;
+
+	oCDownloadManager_UpdateProgressBar(thisptr);
+}
+
+void __stdcall Hooked_CEngineVGui_UpdateCustomProgressBar(float progress, const wchar_t* ws)
+{
+	wchar_t buf[256];
+
+	if (downloadShowBytes)
+	{
+		_snwprintf(buf, sizeof(buf) / sizeof(buf[0]), L"%s (%dM/%dM)", ws, downloadBytesCurrent/1024/1024, downloadBytesTotal/1024/1024);
+		progress = (float)downloadBytesCurrent / (float)downloadBytesTotal;
+	}
+
+	oCEngineVGui_UpdateCustomProgressBar(progress, downloadShowBytes ? buf : ws);
+
+	downloadBytesCurrent = downloadBytesTotal = downloadShowBytes = 0;
+}
+
+void __fastcall Hooked_DownloadCache_PersistToDisk(void* thisptr, void* edx, void* req)
+{
+	oCEngineVGui_UpdateCustomProgressBar(0.0, L"Writing to disk...");
+	oDownloadCache_PersistToDisk(thisptr, req);
+	oCEngineVGui_UpdateCustomProgressBar(100.0, L"Done..."); // Crashes if you put this here :( EDIT: Not anymore? wtf is going on
+}
+
+static int totalBz2, bz2Iter;
+bool __stdcall Hooked_DecompressBZipToDisk(const char* outfile, const char* srcfile, char* data, int totalbytes)
+{
+	oCEngineVGui_UpdateCustomProgressBar(0.0, L"Decompressing bz2 to disk...");
+	totalBz2 = bz2Iter = 0;
+	return oDecompressBZipToDisk(outfile, srcfile, data, totalbytes);
+}
+
+int __stdcall Hooked_BZ2_bzread(int a, int b, int c)
+{
+	int x = oBZ2_bzread(a, b, c);
+	if (x > 0)
+	{
+		totalBz2 += x;
+
+		if (!(++bz2Iter % 16))
+		{
+			wchar_t buf[256];
+			_snwprintf(buf, sizeof(buf) / sizeof(buf[0]), L"Bytes uncompressed and written: %dM", totalBz2 / 1024 / 1024);
+			oCEngineVGui_UpdateCustomProgressBar(0.0, buf);
+		}
+	}
+	else if (x == 0)
+	{
+		oCEngineVGui_UpdateCustomProgressBar(100.0, L"Done...");
+	}
+	else if (x < 0)
+	{
+		oCEngineVGui_UpdateCustomProgressBar(0.0, L"bz2 error");
+	}
+	return x;
+}
+
 BOOL IsProcessRunning(DWORD processID)
 {
 	HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, processID);
@@ -240,6 +334,12 @@ DWORD InjectionEntryPoint(DWORD processID)
 	oControllerMove = (ControllerMoveFn)(FindPattern("client.dll", "55 8B EC 56 8B F1 57 8B 7D 0C 80 BE 8C 00 00 00 00"));
 	oIn_SetSampleTime = (In_SetSampleTimeFn)(FindPattern("client.dll", "55 8B EC F3 0F 10 45 08 F3 0F 11 41 1C"));
 
+	oCDownloadManager_UpdateProgressBar = (CDownloadManager_UpdateProgressBarFn)(FindPattern("engine.dll", "55 8B EC 81 EC 10 02 00 00 56"));
+	oCEngineVGui_UpdateCustomProgressBar = (CEngineVGui_UpdateCustomProgressBarFn)(FindPattern("engine.dll", "55 8B EC 81 EC 00 04 00 00 83 3D ? ? ? ? 00"));
+	oDownloadCache_PersistToDisk = (DownloadCache_PersistToDiskFn)(FindPattern("engine.dll", "55 8B EC 81 EC 08 02 00 00 53 8B D9"));
+	oDecompressBZipToDisk = (DecompressBZipToDiskFn)(FindPattern("engine.dll", "55 8B EC B8 14 03 01 00"));
+	oBZ2_bzread = (BZ2_bzreadFn)(FindPattern("engine.dll", "55 8B EC 8B 45 ? 83 B8 ? ? ? ? 04"));
+
 	uintptr_t tier = (uintptr_t)GetModuleHandleA("tier0.dll");
 	ConMsg = (ConMsgFn)(uintptr_t)GetProcAddress((HMODULE)tier, "?ConMsg@@YAXPBDZZ");
 	Plat_FloatTime = (Plat_FloatTimeFn)(uintptr_t)GetProcAddress((HMODULE)tier, "Plat_FloatTime");
@@ -278,6 +378,11 @@ DWORD InjectionEntryPoint(DWORD processID)
 	DetourAttach(&(PVOID&)oGetAccumulatedMouseDeltasAndResetAccumulators, Hooked_GetAccumulatedMouseDeltasAndResetAccumulators);
 	DetourAttach(&(PVOID&)oControllerMove, Hooked_ControllerMove);
 	DetourAttach(&(PVOID&)oIn_SetSampleTime, Hooked_IN_SetSampleTime);
+	DetourAttach(&(PVOID&)oCEngineVGui_UpdateCustomProgressBar, Hooked_CEngineVGui_UpdateCustomProgressBar);
+	DetourAttach(&(PVOID&)oCDownloadManager_UpdateProgressBar, Hooked_CDownloadManager_UpdateProgressBar);
+	DetourAttach(&(PVOID&)oDownloadCache_PersistToDisk, Hooked_DownloadCache_PersistToDisk);
+	DetourAttach(&(PVOID&)oDecompressBZipToDisk, Hooked_DecompressBZipToDisk);
+	DetourAttach(&(PVOID&)oBZ2_bzread, Hooked_BZ2_bzread);
 	DetourTransactionCommit();
 
 	bool jumpPredPatched = true;
@@ -353,6 +458,16 @@ DWORD InjectionEntryPoint(DWORD processID)
 	DetourDetach(&(PVOID&)oGetAccumulatedMouseDeltasAndResetAccumulators, Hooked_GetAccumulatedMouseDeltasAndResetAccumulators);
 	DetourDetach(&(PVOID&)oControllerMove, Hooked_ControllerMove);
 	DetourDetach(&(PVOID&)oIn_SetSampleTime, Hooked_IN_SetSampleTime);
+	// The game would crash when trying to spawn in after joining.
+	// But only when these DetourDetach() calls were here.
+	// It was CEngine... & the Decompress... one I believe...
+	// Anyway, enabling "/hotpatch" (Create Hotpatchable Image) made it stop crashing.
+	// Why? I still don't know. So annoying.
+	DetourDetach(&(PVOID&)oCEngineVGui_UpdateCustomProgressBar, Hooked_CEngineVGui_UpdateCustomProgressBar);
+	DetourDetach(&(PVOID&)oCDownloadManager_UpdateProgressBar, Hooked_CDownloadManager_UpdateProgressBar);
+	DetourDetach(&(PVOID&)oDownloadCache_PersistToDisk, Hooked_DownloadCache_PersistToDisk);
+	DetourDetach(&(PVOID&)oDecompressBZipToDisk, Hooked_DecompressBZipToDisk);
+	DetourDetach(&(PVOID&)oBZ2_bzread, Hooked_BZ2_bzread);
 	DetourTransactionCommit();
 
 	ExitThread(0);
