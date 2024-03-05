@@ -258,7 +258,10 @@ void __stdcall Hooked_CEngineVGui_UpdateCustomProgressBar(float progress, const 
 
 	if (downloadShowBytes)
 	{
-		_snwprintf(buf, sizeof(buf) / sizeof(buf[0]), L"%s (%dM/%dM)", ws, downloadBytesCurrent/1024/1024, downloadBytesTotal/1024/1024);
+		ws = &ws[12]; // skip "Downloading "
+		if (wcsstr(ws, L"maps/") == ws)
+			ws = &ws[5];
+		_snwprintf(buf, sizeof(buf) / sizeof(buf[0]), L"DL %s (%dM/%dM)", ws, downloadBytesCurrent / 1024 / 1024, downloadBytesTotal / 1024 / 1024);
 		progress = (float)downloadBytesCurrent / (float)downloadBytesTotal;
 	}
 
