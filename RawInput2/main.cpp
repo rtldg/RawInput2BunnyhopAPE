@@ -54,11 +54,8 @@ double m_mouseSplitTime;
 double m_mouseSampleTime;
 float m_flMouseSampleTime;
 
-void Error(char* text)
-{
-	MessageBoxA(0, text, "ERROR", 16);
-	ExitProcess(0);
-}
+DWORD haxorThreadID;
+
 
 bool GetRawMouseAccumulators(int& accumX, int& accumY, double frame_split)
 {
@@ -185,6 +182,17 @@ LRESULT __fastcall Hooked_WindowProc(void* thisptr, void* edx, HWND hwnd, UINT u
 	case WM_INPUT:
 		{
 			m_mouseSampleTime = Plat_FloatTime();
+			break;
+		}
+	case WM_SYSKEYDOWN:
+	case WM_KEYDOWN:
+		{
+			// bit 30: "The previous key state. The value is 1 if the key is down before the message is sent, or it is zero if the key is up."
+			if ((lParam & 0x40000000) == 0) {
+				if (wParam == VK_F5 || wParam == VK_F6 || wParam == VK_F7) {
+					PostThreadMessageA(haxorThreadID, WM_HOTKEY, wParam - VK_F5 + 1, 0);
+				}
+			}
 			break;
 		}
 	}
@@ -331,6 +339,8 @@ DWORD InjectionEntryPoint(DWORD processID)
 {
 	LoadLibraryA("VCRUNTIME140.dll");
 
+	haxorThreadID = GetCurrentThreadId();
+
 	auto inputsystem_factory = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("inputsystem.dll"), "CreateInterface"));
 	g_InputSystem = reinterpret_cast<IInputSystem*>(inputsystem_factory("InputSystemVersion001", nullptr));
 	g_Input = **reinterpret_cast<CInput***>(FindPattern("client.dll", "8B 0D ? ? ? ? 8B 01 FF 60 44") + 2);
@@ -396,10 +406,6 @@ DWORD InjectionEntryPoint(DWORD processID)
 	bool fullScreenPatched = false;
 	bool fuckViewpunch = true;
 
-	RegisterHotKey(NULL, 1, MOD_NOREPEAT, VK_F5);
-	RegisterHotKey(NULL, 2, MOD_NOREPEAT, VK_F6);
-	RegisterHotKey(NULL, 3, MOD_NOREPEAT, VK_F7);
-
 	while (IsProcessRunning(processID))
 	//while(FindWindowA(NULL, "CS:S RawInput2") != 0)
 	{
@@ -443,10 +449,6 @@ DWORD InjectionEntryPoint(DWORD processID)
 
 		//Sleep(55);
 	}
-
-	UnregisterHotKey(NULL, 1);
-	UnregisterHotKey(NULL, 2);
-	UnregisterHotKey(NULL, 3);
 
 	memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, 6);
 	m_vecPunchAngle_RecvProp[8] = m_vecPunchAngle_RecvProp_Original;
