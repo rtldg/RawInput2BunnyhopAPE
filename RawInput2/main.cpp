@@ -35,6 +35,9 @@ DownloadCache_PersistToDiskFn oDownloadCache_PersistToDisk;
 DecompressBZipToDiskFn oDecompressBZipToDisk;
 BZ2_bzreadFn oBZ2_bzread;
 
+typedef void(__thiscall* CHostState_OnClientConnectedFn)(void*);
+CHostState_OnClientConnectedFn oCHostState_OnClientConnected;
+
 // NOTE: __thiscall for the typedefs so the original function is called correctly.
 //       __fastcall for the hook function because... reasons?
 //         TODO check if we can just thiscall those...
@@ -310,6 +313,12 @@ int __stdcall Hooked_BZ2_bzread(int a, int b, int c)
 	return x;
 }
 
+void __fastcall Hooked_CHostState_OnClientConnected(void* thisptr)
+{
+	oCHostState_OnClientConnected(thisptr);
+	FlashWindow(FindWindowA("Valve001", NULL), TRUE);
+}
+
 BOOL IsProcessRunning(DWORD processID)
 {
 	HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, processID);
@@ -360,6 +369,8 @@ DWORD InjectionEntryPoint(DWORD processID)
 	oDecompressBZipToDisk = (DecompressBZipToDiskFn)(FindPattern("engine.dll", "55 8B EC B8 14 03 01 00"));
 	oBZ2_bzread = (BZ2_bzreadFn)(FindPattern("engine.dll", "55 8B EC 8B 45 ? 83 B8 ? ? ? ? 04"));
 
+	oCHostState_OnClientConnected = (CHostState_OnClientConnectedFn)(FindPattern("engine.dll", "55 8B EC 83 EC 0C 56 8B F1 80 BE ? ? ? ? 00 0F 84"));
+
 	uintptr_t tier = (uintptr_t)GetModuleHandleA("tier0.dll");
 	ConMsg = (ConMsgFn)(uintptr_t)GetProcAddress((HMODULE)tier, "?ConMsg@@YAXPBDZZ");
 	Plat_FloatTime = (Plat_FloatTimeFn)(uintptr_t)GetProcAddress((HMODULE)tier, "Plat_FloatTime");
@@ -403,6 +414,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 	DetourAttach(&(PVOID&)oDownloadCache_PersistToDisk, Hooked_DownloadCache_PersistToDisk);
 	DetourAttach(&(PVOID&)oDecompressBZipToDisk, Hooked_DecompressBZipToDisk);
 	DetourAttach(&(PVOID&)oBZ2_bzread, Hooked_BZ2_bzread);
+	DetourAttach(&(PVOID&)oCHostState_OnClientConnected, Hooked_CHostState_OnClientConnected);
 	DetourTransactionCommit();
 
 	bool jumpPredPatched = true;
@@ -480,6 +492,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 	DetourDetach(&(PVOID&)oDownloadCache_PersistToDisk, Hooked_DownloadCache_PersistToDisk);
 	DetourDetach(&(PVOID&)oDecompressBZipToDisk, Hooked_DecompressBZipToDisk);
 	DetourDetach(&(PVOID&)oBZ2_bzread, Hooked_BZ2_bzread);
+	DetourDetach(&(PVOID&)oCHostState_OnClientConnected, Hooked_CHostState_OnClientConnected);
 	DetourTransactionCommit();
 
 	ExitThread(0);
