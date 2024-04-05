@@ -684,13 +684,6 @@ int main()
 
 	PEInjector(processID, InjectionEntryPoint);
 
-	while (1)
-	{
-		if (WaitForSingleObject(g_hProcess, 0) != WAIT_TIMEOUT)
-			return 0;
-		if (_kbhit() && _getch() != VK_RETURN)
-			return 0;
-		Sleep(500);
-	}
+	WaitForSingleObject(g_hProcess, INFINITE);
 	return 0;
 }
