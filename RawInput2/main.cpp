@@ -246,11 +246,12 @@ void __fastcall Hooked_CDownloadManager_UpdateProgressBar(void* thisptr, void* e
 	};
 	struct dlman_t* man = (struct dlman_t*)thisptr;
 
-	if (!man->req || !man->req->http) return;
-
-	downloadBytesCurrent = man->req->current;
-	downloadBytesTotal = man->req->total;
-	downloadShowBytes = 1;
+	if (man->req && man->req->http)
+	{
+		downloadBytesCurrent = man->req->current;
+		downloadBytesTotal = man->req->total;
+		downloadShowBytes = 1;
+	}
 
 	oCDownloadManager_UpdateProgressBar(thisptr);
 }
