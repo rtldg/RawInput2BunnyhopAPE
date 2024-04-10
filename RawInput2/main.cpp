@@ -53,6 +53,11 @@ CDownloadManager_CheckActiveDownloadFn oCDownloadManager_CheckActiveDownload;
 //typedef void(__thiscall* CDownloadManager_QueueInternalFn)(void*, const char*, const char*, const char*, bool, bool);
 //CDownloadManager_QueueInternalFn oCDownloadManager_QueueInternal;
 
+//typedef bool(__thiscall* C_SoundscapeSystem_InitFn)(void*);
+//C_SoundscapeSystem_InitFn oC_SoundscapeSystem_Init;
+typedef void(__thiscall* CHLClient_LevelInitPreEntityFn)(void*, const char*);
+CHLClient_LevelInitPreEntityFn oCHLClient_LevelInitPreEntity;
+
 // NOTE: __thiscall for the typedefs so the original function is called correctly.
 //       __fastcall for the hook function because msvc won't let you use thiscall outside of member declarations...
 //       thiscall = ecx, then stack
@@ -76,6 +81,7 @@ DWORD haxorThreadID;
 char* g_lump_checksums{};
 char g_matching_map_sha1[40+1]{};
 char g_server_lumps_md5_bytes[16]{};
+char g_server_map[260]{};
 bool g_hijack_map = false;
 bool g_we_have_queued_after_a_404 = false;
 
@@ -408,6 +414,7 @@ bool __fastcall Hooked_CClientState_ProcessServerInfo(void* thisptr, void* edx, 
 	g_matching_map_sha1[0] = '\0';
 	g_hijack_map = false;
 	g_we_have_queued_after_a_404 = false;
+	strcpy(g_server_map, *(char**)(msg + 0x44));
 
 	if (g_lump_checksums)
 	{
@@ -527,7 +534,6 @@ void __fastcall Hooked_CDownloadManager_CheckActiveDownload(struct dlman_t* this
 	}
 	oCDownloadManager_CheckActiveDownload(thisptr);
 }
-
 #if 0
 void __fastcall Hooked_CDownloadManager_QueueInternal(void* thisptr, void* edx, const char* sv_downloadurl, const char* urlpath, const char* relativepath, bool http, bool bz2)
 {
@@ -537,6 +543,30 @@ void __fastcall Hooked_CDownloadManager_QueueInternal(void* thisptr, void* edx, 
 	oCDownloadManager_QueueInternal(thisptr, sv_downloadurl, urlpath, relativepath, http, bz2);
 }
 #endif
+
+#if 0
+char** s_pMapName = NULL;
+bool __fastcall Hooked_C_SoundscapeSystem_Init(void* thisptr)
+{
+	//if (*s_pMapName) MessageBoxA(0, *s_pMapName, *s_pMapName, 0);
+	if (!s_pMapName || !*s_pMapName || !**s_pMapName) return oC_SoundscapeSystem_Init(thisptr);
+	char* original_mapname = *s_pMapName;
+	//*s_pMapName = "bhop_badges";
+	//*s_pMapName = g_server_map;
+	//DebugBreak();
+	bool ret = oC_SoundscapeSystem_Init(thisptr);
+
+	if (original_mapname) *s_pMapName = original_mapname;
+
+	return ret;
+}
+#endif
+
+void __fastcall Hooked_CHLClient_LevelInitPreEntity(void* thisptr, void* edx, const char* mapname)
+{
+	char* end = max(strrchr(g_server_map, '/'), strrchr(g_server_map, '\\'));
+	return oCHLClient_LevelInitPreEntity(thisptr, end ? end + 1 : g_server_map);
+}
 
 BOOL IsProcessRunning(DWORD processID)
 {
@@ -597,6 +627,10 @@ DWORD InjectionEntryPoint(DWORD processID)
 	oCDownloadManager_CheckActiveDownload = (CDownloadManager_CheckActiveDownloadFn)(FindPattern("engine.dll", "55 8B EC 51 56 8B F1 8B 4E ? 57"));
 	//oCDownloadManager_QueueInternal = (CDownloadManager_QueueInternalFn)(FindPattern("engine.dll", "55 8B EC 81 EC 0C 02 00 00 53 8B D9 57"));
 
+	//oC_SoundscapeSystem_Init = (C_SoundscapeSystem_InitFn)(FindPattern("client.dll", "55 8B EC 51 53 8B D9 57 C7 83 ? ? ? ? 00 00 00 00"));
+	//s_pMapName = (char**)(((DWORD)GetModuleHandleA("client.dll")) + 0x4f3924); // can't be arsed to make this dynamic
+	oCHLClient_LevelInitPreEntity = (CHLClient_LevelInitPreEntityFn)(FindPattern("client.dll", "55 8B EC 80 3D ? ? ? ? 00 0F 85 ? ? ? ? 8B 0D"));
+
 #if 0
 	// This is used so `download_debug` will actually print the fucking messages!!!
 	// I could not figure out how to get the spew to work because the `developer` cvar kept resetting to 0. Frustrating.
@@ -655,6 +689,8 @@ DWORD InjectionEntryPoint(DWORD processID)
 	DetourAttach(&(PVOID&)oCDownloadManager_Queue, Hooked_CDownloadManager_Queue);
 	DetourAttach(&(PVOID&)oCDownloadManager_CheckActiveDownload, Hooked_CDownloadManager_CheckActiveDownload);
 	//DetourAttach(&(PVOID&)oCDownloadManager_QueueInternal, Hooked_CDownloadManager_QueueInternal);
+	//DetourAttach(&(PVOID&)oC_SoundscapeSystem_Init, Hooked_C_SoundscapeSystem_Init);
+	DetourAttach(&(PVOID&)oCHLClient_LevelInitPreEntity, Hooked_CHLClient_LevelInitPreEntity);
 	DetourTransactionCommit();
 
 	bool jumpPredPatched = true;
@@ -737,6 +773,8 @@ DWORD InjectionEntryPoint(DWORD processID)
 	DetourDetach(&(PVOID&)oCDownloadManager_Queue, Hooked_CDownloadManager_Queue);
 	DetourDetach(&(PVOID&)oCDownloadManager_CheckActiveDownload, Hooked_CDownloadManager_CheckActiveDownload);
 	//DetourDetach(&(PVOID&)oCDownloadManager_QueueInternal, Hooked_CDownloadManager_QueueInternal);
+	//DetourDetach(&(PVOID&)oC_SoundscapeSystem_Init, Hooked_C_SoundscapeSystem_Init);
+	DetourDetach(&(PVOID&)oCHLClient_LevelInitPreEntity, Hooked_CHLClient_LevelInitPreEntity);
 	DetourTransactionCommit();
 
 	ExitThread(0);
