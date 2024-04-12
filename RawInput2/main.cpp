@@ -12,6 +12,8 @@
 #pragma comment(lib, "Urlmon.lib") // URLDownloadToFileW
 #pragma comment(lib, "Wininet.lib") // DeleteUrlCacheEntryW
 
+#define HAXOR_BSP_PERIODS 1
+
 IInputSystem* g_InputSystem = nullptr;
 CInput* g_Input = nullptr;
 
@@ -544,6 +546,31 @@ void __fastcall Hooked_CDownloadManager_QueueInternal(void* thisptr, void* edx, 
 }
 #endif
 
+#if HAXOR_BSP_PERIODS
+bool __stdcall is_okay_name_end(const char* extension, int check_if_bsp)
+{
+	if (check_if_bsp)
+		return 0 == strcmp(strrchr(extension, '.'), ".bsp"); // only good if equals ".bsp"
+	else
+		return 0 == strchr(extension, ' '); // only good if no ' '
+}
+__declspec(naked) void Hack_IsValidFileForTransfer_For_Periods_In_Bsp_Name()
+{
+	__asm {
+		push eax // 0 == extension passed the length & type checks. we don't have to do anything else but the last check (for a space).
+		push esi // extension string
+		call is_okay_name_end
+		// copy of the stack resetting code from original function...
+		pop esi
+		pop edi
+		mov esp, ebp
+		pop ebp
+		// return address of original function is still on stack. so ret with it...
+		ret
+	}
+}
+#endif
+
 #if 0
 char** s_pMapName = NULL;
 bool __fastcall Hooked_C_SoundscapeSystem_Init(void* thisptr)
@@ -626,10 +653,25 @@ DWORD InjectionEntryPoint(DWORD processID)
 	oCDownloadManager_Queue = (CDownloadManager_QueueFn)(FindPattern("engine.dll", "55 8B EC 51 53 8B 5D ? 56 8B F1 53"));
 	oCDownloadManager_CheckActiveDownload = (CDownloadManager_CheckActiveDownloadFn)(FindPattern("engine.dll", "55 8B EC 51 56 8B F1 8B 4E ? 57"));
 	//oCDownloadManager_QueueInternal = (CDownloadManager_QueueInternalFn)(FindPattern("engine.dll", "55 8B EC 81 EC 0C 02 00 00 53 8B D9 57"));
-
 	//oC_SoundscapeSystem_Init = (C_SoundscapeSystem_InitFn)(FindPattern("client.dll", "55 8B EC 51 53 8B D9 57 C7 83 ? ? ? ? 00 00 00 00"));
 	//s_pMapName = (char**)(((DWORD)GetModuleHandleA("client.dll")) + 0x4f3924); // can't be arsed to make this dynamic
 	oCHLClient_LevelInitPreEntity = (CHLClient_LevelInitPreEntityFn)(FindPattern("client.dll", "55 8B EC 80 3D ? ? ? ? 00 0F 85 ? ? ? ? 8B 0D"));
+
+#if HAXOR_BSP_PERIODS
+	auto EndOf_IsValidFileForTransfer = (void**)FindPattern("engine.dll", "75 ? 6A 20 56");
+	DWORD dummy;
+	VirtualProtect(EndOf_IsValidFileForTransfer, 16, PAGE_EXECUTE_READWRITE, &dummy);
+	unsigned char shellcode[] = {
+		// overwrite jnz to block exit after failed ".sw.vtx" check...
+		0x90, // nop
+		0x90, // nop
+		// absolute address "jump"...
+		0x68, 0x78, 0x56, 0x34, 0x12, // push 0x12345678
+		0xC3, // ret
+	};
+	*(void**)(shellcode + 3) = Hack_IsValidFileForTransfer_For_Periods_In_Bsp_Name;
+	memcpy(EndOf_IsValidFileForTransfer, shellcode, sizeof(shellcode));
+#endif
 
 #if 0
 	// This is used so `download_debug` will actually print the fucking messages!!!
