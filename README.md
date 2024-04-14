@@ -16,7 +16,7 @@ Includes **BunnyhopAPE** from [alkatrazbhop](https://github.com/alkatrazbhop/Bun
 - fullscreen hook thing
 - (NEW!) viewpunch remover (e.g. from fall-damage)
 - (NEW!) show file (e.g. map) download progress when loading
-- (NEW!) use the magic of https://fastdl.me to connect to servers that'd give you "Map differs" or "Missing map" errors on connect
+- (NEW!) use the magic of https://fastdl.me to connect to servers that'd give you "Map differs" or "Missing map" errors on connect https://github.com/rtldg/RawInput2BunnyhopAPE/pull/1
 
 ### Usage
 * Run the application.
