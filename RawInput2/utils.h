@@ -48,7 +48,7 @@ DWORD GetPIDByName(const char* ProcName)
 	return NULL;
 }
 
-DWORD GetModuleHandleExtern(DWORD dwProcessId, LPSTR lpModuleName)
+uintptr_t GetModuleHandleExtern(DWORD dwProcessId, const char* lpModuleName)
 {
 	MODULEENTRY32 lpModuleEntry = { 0 };
 	HANDLE hSnapShot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, dwProcessId);
@@ -72,7 +72,7 @@ DWORD GetModuleHandleExtern(DWORD dwProcessId, LPSTR lpModuleName)
 	return NULL;
 }
 
-DWORD FindPatternEx(HANDLE hProc, DWORD base, DWORD len, BYTE* sig, char* mask)
+uintptr_t FindPatternEx(HANDLE hProc, DWORD base, DWORD len, BYTE* sig, char* mask)
 {
 	BYTE* buf = (BYTE*)VirtualAlloc(0, len, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
 	if (ReadProcessMemory(hProc, (LPCVOID)base, buf, len, NULL))
