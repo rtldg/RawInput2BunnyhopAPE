@@ -752,6 +752,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 				else
 					memcpy(jumpPred, nopBuffer, 6);
 				jumpPredPatched = !jumpPredPatched;
+				ConMsg("BunnyhopAPE: %d\n", jumpPredPatched);
 			}
 			else if (msg.message == WM_HOTKEY && msg.wParam == 2)
 			{
@@ -766,6 +767,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 					memcpy(pFUCKD3D9, "\x90\xE9", 2);
 				}
 				fullScreenPatched = !fullScreenPatched;
+				ConMsg("Fullscreen hook: %d\n", fullScreenPatched);
 			}
 			else if (msg.message == WM_HOTKEY && msg.wParam == 3)
 			{
@@ -777,6 +779,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 					m_vecPunchAngle_RecvProp[8] = RecvProxy_ZeroToVector;
 				}
 				fuckViewpunch = !fuckViewpunch;
+				ConMsg("Viewpunch: %d\n", !fuckViewpunch);
 			}
 		}
 
