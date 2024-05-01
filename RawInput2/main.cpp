@@ -549,10 +549,18 @@ void __fastcall Hooked_CDownloadManager_QueueInternal(void* thisptr, void* edx, 
 #if HAXOR_BSP_PERIODS
 bool __stdcall is_okay_name_end(const char* extension, int check_if_bsp)
 {
-	if (check_if_bsp)
-		return 0 == strcmp(strrchr(extension, '.'), ".bsp"); // only good if equals ".bsp"
-	else
-		return 0 == strchr(extension, ' '); // only good if no ' '
+	auto len = strlen(extension);
+
+	if (len != 3 && len != 4)
+	{
+		if (check_if_bsp)
+		{
+			// if we're here then extension is not ".bzp.bz2", ".xbox.vtx", ".dx80.vtx", ".dx90.vtx", or ".sw.vtx".
+			return 0 == _stricmp(strrchr(extension, '.'), ".bsp"); // only good if ends with ".bsp"
+		}
+	}
+
+	return NULL == strchr(extension, ' '); // only good if no ' '
 }
 __declspec(naked) void Hack_IsValidFileForTransfer_For_Periods_In_Bsp_Name()
 {
