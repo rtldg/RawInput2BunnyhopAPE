@@ -7,7 +7,7 @@
 #include <conio.h>
 #include <stdio.h>
 #include "utils.h"
-#include "Detours/detours.h"
+#include "Detours/src/detours.h"
 
 #pragma comment(lib, "Urlmon.lib") // URLDownloadToFileW
 #pragma comment(lib, "Wininet.lib") // DeleteUrlCacheEntryW
@@ -746,6 +746,8 @@ DWORD InjectionEntryPoint(DWORD processID)
 	bool jumpPredPatched = true;
 	bool fullScreenPatched = false;
 	bool fuckViewpunch = true;
+
+	//LoadLibraryA("C:\\code\\StrafeAnalyzer\\Release\\strafe analyzer.dll");
 
 	while (IsProcessRunning(processID))
 	//while(FindWindowA(NULL, "CS:S RawInput2") != 0)

@@ -18,18 +18,18 @@
     <ClCompile Include="main.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
-    <ClCompile Include="Detours\detours.cpp">
+    <ClCompile Include="Detours\src\detours.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
-    <ClCompile Include="Detours\disasm.cpp">
+    <ClCompile Include="Detours\src\disasm.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
-    <ClCompile Include="Detours\modules.cpp">
+    <ClCompile Include="Detours\src\modules.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Detours\detours.h">
+    <ClInclude Include="Detours\src\detours.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
     <ClInclude Include="utils.h">
