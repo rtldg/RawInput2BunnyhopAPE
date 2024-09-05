@@ -25,5 +25,15 @@ Includes **BunnyhopAPE** from [alkatrazbhop](https://github.com/alkatrazbhop/Bun
 * `F6` to toggle the fullscreen hook thing which keeps the game open in fullscreen when you alt-tab (which is nice if you have two monitors)
 * `F7` to toggle the viewpunch remover. Basically a client-side [SuppressViewpunch](https://github.com/xen-000/SuppressViewpunch)
 
-### Building requirements
-* [Microsoft Detours](https://github.com/microsoft/Detours)
+### How does the fastdl map thing work?
+|                                                  | You don't have `mapname` downloaded | You have `mapname` downloaded |
+| ------------------------------------------------ | ----------------------------------- | ----------------------------- |
+| Server's fastdl has `mapname`:                   | Downloads `mapname` from server's fastdl. If `Map differs` error then you have to reconnect. | |
+| Server's fastdl has the wrong map for `mapname`: | Downloads `mapname` from server's fastdl. If `Map differs` error then you have to reconnect. | |
+| Server's fastdl does not have `mapname`:         | Downloads the correct map from `fastdl.me` as `mapname`. | **If your map isn't the same map as the server's then it'll download the correct map from `fastdl.me` (and name it `<SHA1>.bsp`).** |
+
+It should be possible to fix `Map differs` errors when you download from the server's fastdl, but it hasn't been worked on yet.
+
+### Cloning & building
+- `git clone --recurse-submodules https://github.com/rtldg/RawInput2BunnyhopAPE.git`
+- Then just build it with Visual Studio 2022+ haha!
