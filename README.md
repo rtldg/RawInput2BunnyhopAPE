@@ -19,11 +19,12 @@ Includes **BunnyhopAPE** from [alkatrazbhop](https://github.com/alkatrazbhop/Bun
 - (NEW!) use the magic of https://fastdl.me to connect to servers that'd give you "Map differs" or "Missing map" errors on connect https://github.com/rtldg/RawInput2BunnyhopAPE/pull/1
 
 ### Usage
-* Run the application.
+* Download the latest RawInput2BunnyhopAPE.exe from the [Releases](https://github.com/rtldg/RawInput2BunnyhopAPE/releases) page.
+* Run RawInput2BunnyhopAPE.exe
 * Make sure to set ``m_rawinput 2`` in game for it to take effect.
-* `F5` to toggle autohop prediction
-* `F6` to toggle the fullscreen hook thing which keeps the game open in fullscreen when you alt-tab (which is nice if you have two monitors)
-* `F7` to toggle the viewpunch remover. Basically a client-side [SuppressViewpunch](https://github.com/xen-000/SuppressViewpunch)
+* `F5` to toggle autohop prediction (on by default)
+* `F6` to toggle the fullscreen hook thing which keeps the game open in fullscreen when you alt-tab (which is nice if you have two monitors) (off by default)
+* `F7` to toggle the viewpunch remover. Basically a client-side [SuppressViewpunch](https://github.com/xen-000/SuppressViewpunch) (on by default)
 
 ### How does the fastdl map thing work?
 |                                                  | You don't have `mapname` downloaded | You have `mapname` downloaded |
