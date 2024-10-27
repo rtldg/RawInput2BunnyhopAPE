@@ -32,9 +32,9 @@
     <VCProjectVersion>16.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{2ab1de1d-405e-4347-a24a-8f099d9abe4f}</ProjectGuid>
-    <RootNamespace>RawInput2BunnyhopAPE</RootNamespace>
+    <RootNamespace>RawDL</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>RawInput2BunnyhopAPE</ProjectName>
+    <ProjectName>RawDL</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">

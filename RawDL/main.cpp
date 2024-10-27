@@ -1,7 +1,5 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <Windows.h>
-#include <urlmon.h> // URLDownloadToFileW
-#include <wininet.h> // DeleteUrlCacheEntryW
 #include <fstream>
 #include <string>
 #include <conio.h>
@@ -9,25 +7,7 @@
 #include "utils.h"
 #include "Detours/src/detours.h"
 
-#pragma comment(lib, "Urlmon.lib") // URLDownloadToFileW
-#pragma comment(lib, "Wininet.lib") // DeleteUrlCacheEntryW
-
 #define HAXOR_BSP_PERIODS 1
-
-IInputSystem* g_InputSystem = nullptr;
-CInput* g_Input = nullptr;
-
-typedef bool(__thiscall* GetRawMouseAccumulatorsFn)(void*, int&, int&);
-typedef LRESULT(__thiscall* WindowProcFn)(void*, HWND, UINT, WPARAM, LPARAM);
-typedef void(__thiscall* GetAccumulatedMouseDeltasAndResetAccumulatorsFn)(void*, float*, float*);
-typedef void(__thiscall* ControllerMoveFn)(void*, float, void*);
-typedef void(__thiscall* In_SetSampleTimeFn)(void*, float);
-
-GetRawMouseAccumulatorsFn oGetRawMouseAccumulators;
-WindowProcFn oWindowProc;
-GetAccumulatedMouseDeltasAndResetAccumulatorsFn oGetAccumulatedMouseDeltasAndResetAccumulators;
-ControllerMoveFn oControllerMove;
-In_SetSampleTimeFn oIn_SetSampleTime;
 
 typedef void(__thiscall* CDownloadManager_UpdateProgressBarFn)(void*);
 typedef void(__stdcall* CEngineVGui_UpdateCustomProgressBarFn)(float, const wchar_t*);
@@ -69,17 +49,6 @@ CHLClient_LevelInitPreEntityFn oCHLClient_LevelInitPreEntity;
 typedef void(__cdecl* ConMsgFn)(const char*, ...);
 ConMsgFn ConMsg;
 
-typedef double(__cdecl* Plat_FloatTimeFn)();
-Plat_FloatTimeFn Plat_FloatTime;
-
-float mouseMoveFrameTime;
-
-double m_mouseSplitTime;
-double m_mouseSampleTime;
-float m_flMouseSampleTime;
-
-DWORD haxorThreadID;
-
 char* g_lump_checksums{};
 char g_matching_map_sha1[40+1]{};
 char g_server_lumps_md5_bytes[16]{};
@@ -111,174 +80,6 @@ struct dlman_t {
 	char _pre[0x14];
 	struct request_t* req;
 };
-
-bool GetRawMouseAccumulators(int& accumX, int& accumY, double frame_split)
-{
-	static int* m_mouseRawAccumX = (int*)((uintptr_t)g_InputSystem + 0x119C);
-	static int* m_mouseRawAccumY = (int*)((uintptr_t)g_InputSystem + 0x11A0);
-	static bool* m_bRawInputSupported = (bool*)((uintptr_t)g_InputSystem + 0x1198);
-
-	//ConMsg("GetRawMouseAccumulators: %d | %d | %d\n", *(int*)m_mouseRawAccumX, *(int*)m_mouseRawAccumY, *(bool*)m_bRawInputSupported);
-
-	MSG msg;
-	if (frame_split != 0.0 && PeekMessageW(&msg, NULL, WM_INPUT, WM_INPUT, PM_REMOVE))
-	{
-		do
-		{
-			TranslateMessage(&msg);
-			DispatchMessageW(&msg);
-		} while (PeekMessageW(&msg, NULL, WM_INPUT, WM_INPUT, PM_REMOVE));
-	}
-
-	double mouseSplitTime = m_mouseSplitTime;
-	if (mouseSplitTime == 0.0)
-	{
-		mouseSplitTime = m_mouseSampleTime - 0.01;
-		m_mouseSplitTime = mouseSplitTime;
-	}
-
-	double mouseSampleTime = m_mouseSampleTime;
-
-	if (abs(mouseSplitTime - mouseSampleTime) >= 0.000001)
-	{
-		if (frame_split == 0.0 || frame_split >= mouseSampleTime)
-		{
-			accumX = *(int*)m_mouseRawAccumX;
-			accumY = *(int*)m_mouseRawAccumY;
-			*(int*)m_mouseRawAccumX = *(int*)m_mouseRawAccumY = 0;
-
-			m_mouseSplitTime = m_mouseSampleTime;
-
-			return *(bool*)m_bRawInputSupported;
-		}
-		else if (frame_split >= mouseSplitTime)
-		{
-			float splitSegment = (frame_split - mouseSplitTime) / (mouseSampleTime - mouseSplitTime);
-
-			accumX = splitSegment * (*(int*)m_mouseRawAccumX);
-			accumY = splitSegment * (*(int*)m_mouseRawAccumY);
-
-			*(int*)m_mouseRawAccumX -= accumX;
-			*(int*)m_mouseRawAccumY -= accumY;
-
-			m_mouseSplitTime = frame_split;
-
-			return *(bool*)m_bRawInputSupported;
-		}
-	}
-
-	accumX = accumY = 0;
-
-	return *(bool*)m_bRawInputSupported;
-}
-
-void GetAccumulatedMouseDeltasAndResetAccumulators(float* mx, float* my, float frametime)
-{
-	//Assert(mx);
-	//Assert(my);
-
-	static float* m_flAccumulatedMouseXMovement = (float*)((uintptr_t)g_Input + 0x8);
-	static float* m_flAccumulatedMouseYMovement = (float*)((uintptr_t)g_Input + 0xC);
-
-	static uintptr_t client = (uintptr_t)GetModuleHandle("client.dll");
-	int m_rawinput = *(int*)(client + 0x4F5EA0);
-
-	//ConMsg("GetAccumulatedMouseDeltasAndResetAccumulators: %.3f | %.3f | %d\n", *(float*)m_flAccumulatedMouseXMovement, *(float*)m_flAccumulatedMouseYMovement, m_rawinput);
-
-	if (m_flMouseSampleTime > 0.0)
-	{
-		int rawMouseX, rawMouseY;
-		if(m_rawinput != 0)
-		{
-			if (m_rawinput == 2 && frametime > 0.0)
-			{
-				m_flMouseSampleTime -= MIN(m_flMouseSampleTime, frametime);
-				GetRawMouseAccumulators(rawMouseX, rawMouseY, Plat_FloatTime() - m_flMouseSampleTime);
-			}
-			else
-			{
-				GetRawMouseAccumulators(rawMouseX, rawMouseY, 0.0);
-				m_flMouseSampleTime = 0.0;
-			}
-		}
-		else
-		{
-			rawMouseX = *(float*)m_flAccumulatedMouseXMovement;
-			rawMouseY = *(float*)m_flAccumulatedMouseYMovement;
-		}
-
-		*(float*)m_flAccumulatedMouseXMovement = 0.0;
-		*(float*)m_flAccumulatedMouseYMovement = 0.0;
-
-		*mx = (float)rawMouseX;
-		*my = (float)rawMouseY;
-	}
-	else
-	{
-		*mx = 0.0;
-		*my = 0.0;
-	}
-}
-
-bool __fastcall Hooked_GetRawMouseAccumulators(void* thisptr, void* edx, int& accumX, int& accumY)
-{
-	return GetRawMouseAccumulators(accumX, accumY, 0.0);
-
-	//GetRawMouseAccumulators(accumX, accumY, 0.0);
-	//return oGetRawMouseAccumulators(thisptr, accumX, accumY);
-}
-
-LRESULT __fastcall Hooked_WindowProc(void* thisptr, void* edx, HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-	//ConMsg("WindowProc: %.3f\n", m_mouseSampleTime);
-
-	switch (uMsg)
-	{
-	case WM_INPUT:
-		{
-			m_mouseSampleTime = Plat_FloatTime();
-			break;
-		}
-	case WM_SYSKEYDOWN:
-	case WM_KEYDOWN:
-		{
-			// bit 30: "The previous key state. The value is 1 if the key is down before the message is sent, or it is zero if the key is up."
-			if ((lParam & 0x40000000) == 0) {
-				if (wParam == VK_F5 || wParam == VK_F6 || wParam == VK_F7) {
-					PostThreadMessageA(haxorThreadID, WM_HOTKEY, wParam - VK_F5 + 1, 0);
-				}
-			}
-			break;
-		}
-	}
-
-	return oWindowProc(thisptr, hwnd, uMsg, wParam, lParam);
-}
-
-void __fastcall Hooked_GetAccumulatedMouseDeltasAndResetAccumulators(void* thisptr, void* edx, float* mx, float* my)
-{
-	GetAccumulatedMouseDeltasAndResetAccumulators(mx, my, mouseMoveFrameTime);
-
-	mouseMoveFrameTime = 0.0;
-
-	//ConMsg("test: %.5f\n", mouseMoveFrameTime);
-
-	//oGetAccumulatedMouseDeltasAndResetAccumulators(thisptr, mx, my);
-}
-
-void __fastcall Hooked_ControllerMove(void* thisptr, void* edx, float ft, void* cmd)
-{
-	mouseMoveFrameTime = ft;
-
-	oControllerMove(thisptr, mouseMoveFrameTime, cmd);
-}
-
-void __fastcall Hooked_IN_SetSampleTime(void* thisptr, void* edx, float frametime)
-{
-	m_flMouseSampleTime = frametime;
-
-	oIn_SetSampleTime(thisptr, frametime);
-}
 
 static int downloadBytesCurrent, downloadBytesTotal, downloadShowBytes;
 void __fastcall Hooked_CDownloadManager_UpdateProgressBar(struct dlman_t* thisptr, void* edx)
@@ -357,53 +158,6 @@ void __fastcall Hooked_CHostState_OnClientConnected(void* thisptr)
 	FlashWindow(FindWindowA("Valve001", NULL), TRUE);
 }
 
-void DownloadLumpChecksums()
-{
-	wchar_t lump_checksums[MAX_PATH];
-	GetTempPathW(sizeof(lump_checksums)/sizeof(wchar_t), lump_checksums);
-	wcscat(lump_checksums, L"lump_checksums.csv");
-	WIN32_FILE_ATTRIBUTE_DATA attr;
-	bool needs_download = true;
-
-	if (GetFileAttributesExW(lump_checksums, GetFileExInfoStandard, &attr))
-	{
-		UINT64 currenttime;
-		GetSystemTimeAsFileTime((LPFILETIME)&currenttime);
-		INT64 difference = currenttime - *(UINT64*)&attr.ftLastWriteTime;
-		if (difference < 0) difference = -difference;
-		// a FILETIME is how many 100 nanoseconds since January 1, 1601.
-		if (difference < (10ull * 1000 * 1000 * 60 * 60 * 36)) // -> micro -> milli -> second -> minute -> hour -> X
-			needs_download = false;
-	}
-
-	if (needs_download)
-	{
-		printf("downloading https://venus.fastdl.me/lump_checksums.csv to %%TEMP%%\\lump_checksums.csv\nit's almost 4 megabytes so it might take a moment...\n\n");
-		DeleteUrlCacheEntryW(L"https://venus.fastdl.me/lump_checksums.csv"); // fuck you windows
-		HRESULT res = URLDownloadToFileW(NULL, L"https://venus.fastdl.me/lump_checksums.csv", lump_checksums, 0, NULL);
-		DeleteUrlCacheEntryW(L"https://venus.fastdl.me/lump_checksums.csv"); // fuck you windows
-	}
-}
-void ReadLumpChecksums()
-{
-	wchar_t lump_checksums[MAX_PATH];
-	GetTempPathW(sizeof(lump_checksums) / sizeof(wchar_t), lump_checksums);
-	wcscat(lump_checksums, L"lump_checksums.csv");
-
-	// dumb
-	HANDLE hFile = CreateFileW(lump_checksums, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (hFile != INVALID_HANDLE_VALUE)
-	{
-		DWORD filesize = GetFileSize(hFile, NULL);
-		char *filecontents = (char*)calloc(filesize + 1, 1);
-		auto success = ReadFile(hFile, filecontents, filesize, NULL, NULL);
-		CloseHandle(hFile);
-		if (success)
-			g_lump_checksums = filecontents;
-		else
-			free(filecontents);
-	}
-}
 std::string bytes_to_hex(char* bytes, size_t len)
 {
 	char buf[101]{}; // sha1 = 40 characters. md5 = 32.
@@ -487,6 +241,38 @@ void Fix_CDownloadManager_SetupURLPath(struct dlman_t* thisptr)
 	VirtualProtect(thisptr->vtable, 64, PAGE_READWRITE, &fuck);
 	thisptr->vtable[4] = Righter_CDownloadManager_SetupURLPath;
 }
+void __fastcall Hooked_CDownloadManager_Queue(void* thisptr, void* edx, char* sv_downloadurl, char* urlpath, char* file)
+{
+	bool is_map = !strncmp("maps\\", file, 5) && !strncmp(".bsp", &file[strlen(file) - 4], 4);
+	ConMsg("%d '%s' '%s' '%s'\n", is_map, sv_downloadurl, urlpath, file);
+
+	// !!!!!!!!!!!!!
+	// !!!!!!!!!!!!!
+	// !!!!!!!!!!!!!
+	// net_maxfilesize on servers defaults to 16MB so this piece of shit doesn't download maps half the time...
+	// net_maxfilesize on servers defaults to 16MB so this piece of shit doesn't download maps half the time...
+	// net_maxfilesize on servers defaults to 16MB so this piece of shit doesn't download maps half the time...
+	// net_maxfilesize on servers defaults to 16MB so this piece of shit doesn't download maps half the time...
+	// !!!!!!!!!!!!!
+	// !!!!!!!!!!!!!
+	// !!!!!!!!!!!!!
+
+	if (is_map)
+	{
+		//Fix_CDownloadManager_SetupURLPath((struct dlman_t*)thisptr);
+
+		//char urlbuf[256], filebuf[256];
+		//_snprintf(filebuf, sizeof(filebuf), "maps/%s.bsp", g_matching_map_sha1);
+		//_snprintf(urlbuf, sizeof(urlbuf), "hashed/%s.bsp", g_matching_map_sha1);
+		ConMsg("'%s' '%s'\n", urlpath, file);
+		oCDownloadManager_Queue(thisptr, "", urlpath, file);
+	}
+	else
+	{
+		oCDownloadManager_Queue(thisptr, sv_downloadurl, urlpath, file);
+	}
+}
+#if 0
 void __fastcall Hooked_CDownloadManager_Queue(void* thisptr, void* edx, char* sv_downloadurl, char* bleh, char* file)
 {
 #if 0
@@ -515,6 +301,7 @@ void __fastcall Hooked_CDownloadManager_Queue(void* thisptr, void* edx, char* sv
 		oCDownloadManager_Queue(thisptr, sv_downloadurl, bleh, file);
 	}
 }
+#endif
 void __fastcall Hooked_CDownloadManager_CheckActiveDownload(struct dlman_t* thisptr)
 {
 	if (!g_we_have_queued_after_a_404 && g_matching_map_sha1[0] != '\0' && thisptr->req && thisptr->req->http && thisptr->req->state == 4 && !thisptr->req->bz2)
@@ -625,29 +412,16 @@ BOOL GetMessageWithTimeout(MSG* msg, UINT to)
 	return TRUE;
 }
 
-void RecvProxy_ZeroToVector(const void* fuck1, void* fuck2, float* fuck3)
-{
-	for (int i = 0; i < 3; i++)
-		fuck3[i] = 0.0;
-}
-
 DWORD InjectionEntryPoint(DWORD processID)
 {
 	LoadLibraryA("VCRUNTIME140.dll");
 
-	haxorThreadID = GetCurrentThreadId();
-	ReadLumpChecksums();
+	auto MiddleOf_CDownloadManager_Queue = (char*)FindPattern("engine.dll", "74 ? 6A 07 68");
+	DWORD originalProtect;
+	VirtualProtect((LPVOID)MiddleOf_CDownloadManager_Queue, 1, PAGE_EXECUTE_READWRITE, &originalProtect);
+	*MiddleOf_CDownloadManager_Queue = 0xEB; // change JZ to JMP
 
-	auto inputsystem_factory = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("inputsystem.dll"), "CreateInterface"));
-	g_InputSystem = reinterpret_cast<IInputSystem*>(inputsystem_factory("InputSystemVersion001", nullptr));
-	g_Input = **reinterpret_cast<CInput***>(FindPattern("client.dll", "8B 0D ? ? ? ? 8B 01 FF 60 44") + 2);
-
-	oGetRawMouseAccumulators = (GetRawMouseAccumulatorsFn)(FindPattern("inputsystem.dll", "55 8B EC 8B 45 08 8B 91 9C 11 00 00"));
-	oWindowProc = (WindowProcFn)(FindPattern("inputsystem.dll", "55 8B EC 83 EC 20 57"));
-	oGetAccumulatedMouseDeltasAndResetAccumulators = (GetAccumulatedMouseDeltasAndResetAccumulatorsFn)(FindPattern("client.dll", "55 8B EC 53 8B 5D 0C 56 8B F1 57"));
-	oControllerMove = (ControllerMoveFn)(FindPattern("client.dll", "55 8B EC 56 8B F1 57 8B 7D 0C 80 BE 8C 00 00 00 00"));
-	oIn_SetSampleTime = (In_SetSampleTimeFn)(FindPattern("client.dll", "55 8B EC F3 0F 10 45 08 F3 0F 11 41 1C"));
-
+#if 0
 	oCDownloadManager_UpdateProgressBar = (CDownloadManager_UpdateProgressBarFn)(FindPattern("engine.dll", "55 8B EC 81 EC 10 02 00 00 56"));
 	oCEngineVGui_UpdateCustomProgressBar = (CEngineVGui_UpdateCustomProgressBarFn)(FindPattern("engine.dll", "55 8B EC 81 EC 00 04 00 00 83 3D ? ? ? ? 00"));
 	oDownloadCache_PersistToDisk = (DownloadCache_PersistToDiskFn)(FindPattern("engine.dll", "55 8B EC 81 EC 08 02 00 00 53 8B D9"));
@@ -658,30 +432,15 @@ DWORD InjectionEntryPoint(DWORD processID)
 
 	oCClientState_ProcessServerInfo = (CClientState_ProcessServerInfoFn)(FindPattern("engine.dll", "55 8B EC 56 57 8B F1 E8 ? ? ? ? 8B 7D"));
 	MD5_MapFile = (MD5_MapFileFn)(FindPattern("engine.dll", "55 8B EC 81 EC 6C 08 00 00"));
-	oCDownloadManager_Queue = (CDownloadManager_QueueFn)(FindPattern("engine.dll", "55 8B EC 51 53 8B 5D ? 56 8B F1 53"));
 	oCDownloadManager_CheckActiveDownload = (CDownloadManager_CheckActiveDownloadFn)(FindPattern("engine.dll", "55 8B EC 51 56 8B F1 8B 4E ? 57"));
 	//oCDownloadManager_QueueInternal = (CDownloadManager_QueueInternalFn)(FindPattern("engine.dll", "55 8B EC 81 EC 0C 02 00 00 53 8B D9 57"));
 	//oC_SoundscapeSystem_Init = (C_SoundscapeSystem_InitFn)(FindPattern("client.dll", "55 8B EC 51 53 8B D9 57 C7 83 ? ? ? ? 00 00 00 00"));
 	//s_pMapName = (char**)(((DWORD)GetModuleHandleA("client.dll")) + 0x4f3924); // can't be arsed to make this dynamic
 	oCHLClient_LevelInitPreEntity = (CHLClient_LevelInitPreEntityFn)(FindPattern("client.dll", "55 8B EC 80 3D ? ? ? ? 00 0F 85 ? ? ? ? 8B 0D"));
-
-#if HAXOR_BSP_PERIODS
-	auto EndOf_IsValidFileForTransfer = (void**)FindPattern("engine.dll", "75 ? 6A 20 56");
-	DWORD dummy;
-	VirtualProtect(EndOf_IsValidFileForTransfer, 16, PAGE_EXECUTE_READWRITE, &dummy);
-	unsigned char shellcode[] = {
-		// overwrite jnz to block exit after failed ".sw.vtx" check...
-		0x90, // nop
-		0x90, // nop
-		// absolute address "jump"...
-		0x68, 0x78, 0x56, 0x34, 0x12, // push 0x12345678
-		0xC3, // ret
-	};
-	*(void**)(shellcode + 3) = Hack_IsValidFileForTransfer_For_Periods_In_Bsp_Name;
-	memcpy(EndOf_IsValidFileForTransfer, shellcode, sizeof(shellcode));
 #endif
+	oCDownloadManager_Queue = (CDownloadManager_QueueFn)(FindPattern("engine.dll", "55 8B EC 51 53 8B 5D ? 56 8B F1 53"));
 
-#if 0
+#if 1
 	// This is used so `download_debug` will actually print the fucking messages!!!
 	// I could not figure out how to get the spew to work because the `developer` cvar kept resetting to 0. Frustrating.
 	// I wanted to set the ConDColorMsg IAT entry to point to ConColorMsg but that's why more work than this stupid piece of shit.
@@ -693,42 +452,10 @@ DWORD InjectionEntryPoint(DWORD processID)
 
 	uintptr_t tier = (uintptr_t)GetModuleHandleA("tier0.dll");
 	ConMsg = (ConMsgFn)(uintptr_t)GetProcAddress((HMODULE)tier, "?ConMsg@@YAXPBDZZ");
-	Plat_FloatTime = (Plat_FloatTimeFn)(uintptr_t)GetProcAddress((HMODULE)tier, "Plat_FloatTime");
-
-	//ConMsg("Plat_FloatTime: %.5f\n", Plat_FloatTime());
-
-	BYTE nopBuffer[6] = { 0x90,0x90,0x90,0x90,0x90,0x90 };
-	BYTE jumpPredOriginalBytes[6];
-	auto jumpPred = reinterpret_cast<void*>(FindPattern("client.dll", "85 C0 8B 46 08 0F 84 ? FF FF FF F6 40 28 02 0F 85 ? FF FF FF") + 15);
-	memcpy(jumpPredOriginalBytes, jumpPred, 6);
-	DWORD jumpPredOriginalProtect;
-	VirtualProtect(jumpPred, 6, PAGE_EXECUTE_READWRITE, &jumpPredOriginalProtect);
-	memcpy(jumpPred, nopBuffer, 6);
-
-	auto pReleaseVideo = reinterpret_cast<void*>(FindPattern("engine.dll", "56 8B F1 8B 06 8B 40 ? FF D0 84 C0 75 ? 8B 06") + 12);
-	auto pFUCKD3D9 = reinterpret_cast<void*>(FindPattern("d3d9.dll", "0F 84 ? ? ? ? 6A 07 FF B3"));
-	DWORD pReleaseVideoOriginalProtect, pFUCKD3D9OriginalProtect;
-	VirtualProtect(pReleaseVideo, 1, PAGE_EXECUTE_READWRITE, &pReleaseVideoOriginalProtect);
-	VirtualProtect(pFUCKD3D9, 2, PAGE_EXECUTE_READWRITE, &pFUCKD3D9OriginalProtect);
-
-	BYTE prleNew[6] = { 0x5e,   0x5f,   0x5d,   0xc2, 0x04, 0x00 }; // pop esi ; pop edi ; pop ebp ; ret 0x4
-	BYTE prleOriginal[6];
-	auto pFuckPlayerRoughLandingEffects = reinterpret_cast<void*>(FindPattern("client.dll", "55 8B EC F3 0F 10 45 ? 0F 2F 05 ? ? ? ? 57") + 73 /* after ->PlayStepSound */);
-	memcpy(prleOriginal, pFuckPlayerRoughLandingEffects, 6);
-	DWORD pFuckPlayerRoughtLandingEffectsOriginalProtect;
-	VirtualProtect(pFuckPlayerRoughLandingEffects, 2, PAGE_EXECUTE_READWRITE, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
-	memcpy(pFuckPlayerRoughLandingEffects, prleNew, 6);
-	auto m_vecPunchAngle_RecvProp = (void**)((DWORD)GetModuleHandleA("client.dll") + 0x4c8c40);
-	auto m_vecPunchAngle_RecvProp_Original = m_vecPunchAngle_RecvProp[8];
-	m_vecPunchAngle_RecvProp[8] = RecvProxy_ZeroToVector;
 
 	DetourTransactionBegin();
 	DetourUpdateThread(GetCurrentThread());
-	DetourAttach(&(PVOID&)oGetRawMouseAccumulators, Hooked_GetRawMouseAccumulators);
-	DetourAttach(&(PVOID&)oWindowProc, Hooked_WindowProc);
-	DetourAttach(&(PVOID&)oGetAccumulatedMouseDeltasAndResetAccumulators, Hooked_GetAccumulatedMouseDeltasAndResetAccumulators);
-	DetourAttach(&(PVOID&)oControllerMove, Hooked_ControllerMove);
-	DetourAttach(&(PVOID&)oIn_SetSampleTime, Hooked_IN_SetSampleTime);
+#if 0
 	DetourAttach(&(PVOID&)oCEngineVGui_UpdateCustomProgressBar, Hooked_CEngineVGui_UpdateCustomProgressBar);
 	DetourAttach(&(PVOID&)oCDownloadManager_UpdateProgressBar, Hooked_CDownloadManager_UpdateProgressBar);
 	DetourAttach(&(PVOID&)oDownloadCache_PersistToDisk, Hooked_DownloadCache_PersistToDisk);
@@ -736,18 +463,13 @@ DWORD InjectionEntryPoint(DWORD processID)
 	DetourAttach(&(PVOID&)oBZ2_bzread, Hooked_BZ2_bzread);
 	DetourAttach(&(PVOID&)oCHostState_OnClientConnected, Hooked_CHostState_OnClientConnected);
 	DetourAttach(&(PVOID&)oCClientState_ProcessServerInfo, Hooked_CClientState_ProcessServerInfo);
-	DetourAttach(&(PVOID&)oCDownloadManager_Queue, Hooked_CDownloadManager_Queue);
 	DetourAttach(&(PVOID&)oCDownloadManager_CheckActiveDownload, Hooked_CDownloadManager_CheckActiveDownload);
 	//DetourAttach(&(PVOID&)oCDownloadManager_QueueInternal, Hooked_CDownloadManager_QueueInternal);
 	//DetourAttach(&(PVOID&)oC_SoundscapeSystem_Init, Hooked_C_SoundscapeSystem_Init);
 	DetourAttach(&(PVOID&)oCHLClient_LevelInitPreEntity, Hooked_CHLClient_LevelInitPreEntity);
+#endif
+	DetourAttach(&(PVOID&)oCDownloadManager_Queue, Hooked_CDownloadManager_Queue);
 	DetourTransactionCommit();
-
-	bool jumpPredPatched = true;
-	bool fullScreenPatched = false;
-	bool fuckViewpunch = true;
-
-	//LoadLibraryA("C:\\code\\StrafeAnalyzer\\Release\\strafe analyzer.dll");
 
 	while (IsProcessRunning(processID))
 	//while(FindWindowA(NULL, "CS:S RawInput2") != 0)
@@ -755,64 +477,14 @@ DWORD InjectionEntryPoint(DWORD processID)
 		MSG msg;
 		if (GetMessageWithTimeout(&msg, 200))
 		{
-			if (msg.message == WM_HOTKEY && msg.wParam == 1)
-			{
-				if (jumpPredPatched)
-					memcpy(jumpPred, jumpPredOriginalBytes, 6);
-				else
-					memcpy(jumpPred, nopBuffer, 6);
-				jumpPredPatched = !jumpPredPatched;
-				ConMsg("BunnyhopAPE: %d\n", jumpPredPatched);
-			}
-			else if (msg.message == WM_HOTKEY && msg.wParam == 2)
-			{
-				if (fullScreenPatched)
-				{
-					memcpy(pReleaseVideo, "\x75", 1);
-					memcpy(pFUCKD3D9, "\x0F\x84", 2);
-				}
-				else
-				{
-					memcpy(pReleaseVideo, "\xEB", 1);
-					memcpy(pFUCKD3D9, "\x90\xE9", 2);
-				}
-				fullScreenPatched = !fullScreenPatched;
-				ConMsg("Fullscreen hook: %d\n", fullScreenPatched);
-			}
-			else if (msg.message == WM_HOTKEY && msg.wParam == 3)
-			{
-				if (fuckViewpunch) {
-					memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, 6);
-					m_vecPunchAngle_RecvProp[8] = m_vecPunchAngle_RecvProp_Original;
-				} else {
-					memcpy(pFuckPlayerRoughLandingEffects, prleNew, 6);
-					m_vecPunchAngle_RecvProp[8] = RecvProxy_ZeroToVector;
-				}
-				fuckViewpunch = !fuckViewpunch;
-				ConMsg("Viewpunch: %d\n", !fuckViewpunch);
-			}
 		}
 
-		//Sleep(55);
+		Sleep(55);
 	}
-
-	memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, 6);
-	m_vecPunchAngle_RecvProp[8] = m_vecPunchAngle_RecvProp_Original;
-	VirtualProtect(pFuckPlayerRoughLandingEffects, 6, pFuckPlayerRoughtLandingEffectsOriginalProtect, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
-	memcpy(pReleaseVideo, "\x75", 1);
-	memcpy(pFUCKD3D9, "\x0F\x84", 2);
-	VirtualProtect(pReleaseVideo, 1, pReleaseVideoOriginalProtect, &pReleaseVideoOriginalProtect);
-	VirtualProtect(pFUCKD3D9, 2, pFUCKD3D9OriginalProtect, &pFUCKD3D9OriginalProtect);
-	memcpy(jumpPred, jumpPredOriginalBytes, 6);
-	VirtualProtect(jumpPred, 6, jumpPredOriginalProtect, &jumpPredOriginalProtect);
 
 	DetourTransactionBegin();
 	DetourUpdateThread(GetCurrentThread());
-	DetourDetach(&(PVOID&)oGetRawMouseAccumulators, Hooked_GetRawMouseAccumulators);
-	DetourDetach(&(PVOID&)oWindowProc, Hooked_WindowProc);
-	DetourDetach(&(PVOID&)oGetAccumulatedMouseDeltasAndResetAccumulators, Hooked_GetAccumulatedMouseDeltasAndResetAccumulators);
-	DetourDetach(&(PVOID&)oControllerMove, Hooked_ControllerMove);
-	DetourDetach(&(PVOID&)oIn_SetSampleTime, Hooked_IN_SetSampleTime);
+#if 0
 	// The game would crash when trying to spawn in after joining.
 	// But only when these DetourDetach() calls were here.
 	// It was CEngine... & the Decompress... one I believe...
@@ -825,11 +497,12 @@ DWORD InjectionEntryPoint(DWORD processID)
 	DetourDetach(&(PVOID&)oBZ2_bzread, Hooked_BZ2_bzread);
 	DetourDetach(&(PVOID&)oCHostState_OnClientConnected, Hooked_CHostState_OnClientConnected);
 	DetourDetach(&(PVOID&)oCClientState_ProcessServerInfo, Hooked_CClientState_ProcessServerInfo);
-	DetourDetach(&(PVOID&)oCDownloadManager_Queue, Hooked_CDownloadManager_Queue);
 	DetourDetach(&(PVOID&)oCDownloadManager_CheckActiveDownload, Hooked_CDownloadManager_CheckActiveDownload);
 	//DetourDetach(&(PVOID&)oCDownloadManager_QueueInternal, Hooked_CDownloadManager_QueueInternal);
 	//DetourDetach(&(PVOID&)oC_SoundscapeSystem_Init, Hooked_C_SoundscapeSystem_Init);
 	DetourDetach(&(PVOID&)oCHLClient_LevelInitPreEntity, Hooked_CHLClient_LevelInitPreEntity);
+#endif
+	DetourDetach(&(PVOID&)oCDownloadManager_Queue, Hooked_CDownloadManager_Queue);
 	DetourTransactionCommit();
 
 	ExitThread(0);
@@ -969,8 +642,6 @@ std::string GetCSSLaunchOptions(std::string const & steampath, std::string const
 int main()
 {
 	SetConsoleTitle("RawInput2BunnyhopAPE");
-
-	DownloadLumpChecksums();
 
 	//printf("%d\n", &(((struct request_t*)0)->total));
 
