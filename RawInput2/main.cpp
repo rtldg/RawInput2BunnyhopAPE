@@ -672,9 +672,20 @@ DWORD InjectionEntryPoint(DWORD processID)
 	ReadLumpChecksums();
 #endif
 
-	oWindowProc = (WindowProcFn)(FindPattern("inputsystem.dll", "55 8B EC 83 EC 20 57"));
+	// Search for CallWindowProc[A] in inputsystem.dll. You should find it called from `CInputSystem::ChainWindowMessage()` (which is called by `CInputSystem::WindowProc()`).
+	// On x64 (and maybe x32) you'll probably find `ChainWindowMessage` inlined into `CInputSystem::WindowProc()`.
+#if TESTING_ON_TF2
+	oWindowProc = (WindowProcFn)(FindPattern("inputsystem.dll", "44 89 44 24 ? 48 89 54 24"));
+#else
+	oWindowProc = (WindowProcFn)(FindPattern("inputsystem.dll", ""));
+#endif
 
-	oCHostState_OnClientConnected = (CHostState_OnClientConnectedFn)(FindPattern("engine.dll", "55 8B EC 83 EC 0C 56 8B F1 80 BE ? ? ? ? 00 0F 84"));
+	// You can find this function by searching for the string that starts with "setpos_exact %f %f %f".
+#if TESTING_ON_TF2
+	oCHostState_OnClientConnected = (CHostState_OnClientConnectedFn)(FindPattern("engine.dll", "40 53 48 83 EC 60 80 B9 ? ? ? ? 00 48 8B D9 0F 84"));
+#else
+	oCHostState_OnClientConnected = (CHostState_OnClientConnectedFn)(FindPattern("engine.dll", ""));
+#endif
 
 #if DO_RAWINPUT2
 	auto inputsystem_factory = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("inputsystem.dll"), "CreateInterface"));
@@ -730,7 +741,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 #endif
 
 	uintptr_t tier = (uintptr_t)GetModuleHandleA("tier0.dll");
-	ConMsg = (ConMsgFn)(uintptr_t)GetProcAddress((HMODULE)tier, "?ConMsg@@YAXPBDZZ");
+	ConMsg = (ConMsgFn)(uintptr_t)GetProcAddress((HMODULE)tier, "?ConMsg@@YAXPEBDZZ");
 #if DO_RAWINPUT2
 	Plat_FloatTime = (Plat_FloatTimeFn)(uintptr_t)GetProcAddress((HMODULE)tier, "Plat_FloatTime");
 #endif
@@ -739,7 +750,13 @@ DWORD InjectionEntryPoint(DWORD processID)
 
 	BYTE nopBuffer[6] = { 0x90,0x90,0x90,0x90,0x90,0x90 };
 	BYTE jumpPredOriginalBytes[6];
-	auto jumpPred = reinterpret_cast<void*>(FindPattern("client.dll", "85 C0 8B 46 08 0F 84 ? FF FF FF F6 40 28 02 0F 85 ? FF FF FF") + 15);
+	// Search for the float32 268.3281572999747 in client.dll and then find the `// don't pogo stick` if-statement
+#if TESTING_ON_TF2
+	auto jumpPred = reinterpret_cast<void*>(FindPattern("client.dll", "F6 40 ? 02 0F 85 ? ? ? ? 80 B9 ? ? ? ? 00") + 4);
+#else
+	auto jumpPred = reinterpret_cast<void*>(FindPattern("client.dll", "") + 0);
+#endif
+	ConMsg("jumpPred = 0x%llx\n", jumpPred);
 	memcpy(jumpPredOriginalBytes, jumpPred, 6);
 	DWORD jumpPredOriginalProtect;
 	VirtualProtect(jumpPred, 6, PAGE_EXECUTE_READWRITE, &jumpPredOriginalProtect);
