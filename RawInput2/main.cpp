@@ -1,5 +1,5 @@
 
-#define DO_RAWINPUT2 0
+#define DO_RAWINPUT2 1
 #define DO_FASTDL_THINGS 0
 #define DO_FULLSCREEN_PATCH 0
 #define DO_VIEWPUNCH_PATCH 1
@@ -33,7 +33,7 @@ WindowProcFn oWindowProc;
 
 #if DO_RAWINPUT2
 IInputSystem* g_InputSystem = nullptr;
-CInput* g_Input = nullptr;
+//CInput* g_Input = nullptr;
 
 typedef bool(__thiscall* GetRawMouseAccumulatorsFn)(void*, int&, int&);
 typedef void(__thiscall* GetAccumulatedMouseDeltasAndResetAccumulatorsFn)(void*, float*, float*);
@@ -92,6 +92,8 @@ CBaseHudChat_ChatPrintfFn CBaseHudChat_ChatPrintf;
 typedef double(__cdecl* Plat_FloatTimeFn)();
 Plat_FloatTimeFn Plat_FloatTime;
 
+int* m_rawinput_cvar;
+
 float mouseMoveFrameTime;
 
 double m_mouseSplitTime;
@@ -138,9 +140,10 @@ struct dlman_t {
 #if DO_RAWINPUT2
 bool GetRawMouseAccumulators(int& accumX, int& accumY, double frame_split)
 {
-	static int* m_mouseRawAccumX = (int*)((uintptr_t)g_InputSystem + 0x119C);
-	static int* m_mouseRawAccumY = (int*)((uintptr_t)g_InputSystem + 0x11A0);
-	static bool* m_bRawInputSupported = (bool*)((uintptr_t)g_InputSystem + 0x1198);
+	// You can get these offsets from inside CInputSystem::GetRawMouseAccumulators().
+	static int* m_mouseRawAccumX = (int*)((uintptr_t)g_InputSystem + 0x48dc);
+	static int* m_mouseRawAccumY = (int*)((uintptr_t)g_InputSystem + 0x48e0);
+	static bool* m_bRawInputSupported = (bool*)((uintptr_t)g_InputSystem + 0x48d8);
 
 	//ConMsg("GetRawMouseAccumulators: %d | %d | %d\n", *(int*)m_mouseRawAccumX, *(int*)m_mouseRawAccumY, *(bool*)m_bRawInputSupported);
 
@@ -201,11 +204,10 @@ void GetAccumulatedMouseDeltasAndResetAccumulators(CInput* thisptr, float* mx, f
 	//Assert(mx);
 	//Assert(my);
 
-	static float* m_flAccumulatedMouseXMovement = (float*)((uintptr_t)thisptr + 0x8);
-	static float* m_flAccumulatedMouseYMovement = (float*)((uintptr_t)thisptr + 0xC);
+	static float* m_flAccumulatedMouseXMovement = (float*)((uintptr_t)thisptr + 0xc);
+	static float* m_flAccumulatedMouseYMovement = (float*)((uintptr_t)thisptr + 0x10);
 
-	static uintptr_t client = (uintptr_t)GetModuleHandle("client.dll");
-	int m_rawinput = *(int*)(client + 0x4F5EA0);
+	int m_rawinput = *m_rawinput_cvar;
 
 	//ConMsg("GetAccumulatedMouseDeltasAndResetAccumulators: %.3f | %.3f | %d\n", *(float*)m_flAccumulatedMouseXMovement, *(float*)m_flAccumulatedMouseYMovement, m_rawinput);
 
@@ -693,12 +695,43 @@ DWORD InjectionEntryPoint(DWORD processID)
 #if DO_RAWINPUT2
 	auto inputsystem_factory = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("inputsystem.dll"), "CreateInterface"));
 	g_InputSystem = reinterpret_cast<IInputSystem*>(inputsystem_factory("InputSystemVersion001", nullptr));
-	g_Input = **reinterpret_cast<CInput***>(FindPattern("client.dll", "8B 0D ? ? ? ? 8B 01 FF 60 44") + 2);
+	//g_Input = **reinterpret_cast<CInput***>(FindPattern("client.dll", "8B 0D ? ? ? ? 8B 01 FF 60 44") + 2);
 
-	oGetRawMouseAccumulators = (GetRawMouseAccumulatorsFn)(FindPattern("inputsystem.dll", "55 8B EC 8B 45 08 8B 91 9C 11 00 00"));
-	oGetAccumulatedMouseDeltasAndResetAccumulators = (GetAccumulatedMouseDeltasAndResetAccumulatorsFn)(FindPattern("client.dll", "55 8B EC 53 8B 5D 0C 56 8B F1 57"));
-	oControllerMove = (ControllerMoveFn)(FindPattern("client.dll", "55 8B EC 56 8B F1 57 8B 7D 0C 80 BE 8C 00 00 00 00"));
-	oIn_SetSampleTime = (In_SetSampleTimeFn)(FindPattern("client.dll", "55 8B EC F3 0F 10 45 08 F3 0F 11 41 1C"));
+	/*
+	This is kind of a hassle to find and I went a very round-about way for it.
+	- In client.dll:
+	  Find CInput::ActivateMouse() by searching for a call to the winapi SystemParametersInfoA.
+      (ActivateMouse() is probably the first function that references SystemParametersInfoA).
+	- At the bottom of ActivateMouse(): grab the `(**(code **)(*DAT_181074218 + 0x138))(DAT_181074218,local_res10,local_res8);`
+	  The DAT_181074218 is the g_InputSystem / `inputsystem` pointer.
+	    (Rename it to `g_InputSystem` because we're going to use it again to find GetAccumulatedMouseDeltasAndResetAccumulators()!)
+	  The 0x138 is the vtable byte offset. 0x138 / 8 = 39.
+	- In inputsystem.dll:
+	  Search for "CInputSystem::AttachToWindow: Cannot attach" to find CInputSystem::AttachToWindow().
+	  Use the references to AttachToWindow() to find the CInputSystem vtable.
+	- Go to the vtable[39] (40th) function and you should find GetRawMouseAccumulators. Hopefully.
+	*/
+	oGetRawMouseAccumulators = (GetRawMouseAccumulatorsFn)(FindPattern("inputsystem.dll", "8B 81 ? ? ? ? 89 02"));
+	/*
+	In client.dll:
+	Use the g_InputSystem value we found and then search for references where they use the vtable byte offset for GetRawMouseAccumulators() again!
+	It was one of the last references for me.
+	*/
+	oGetAccumulatedMouseDeltasAndResetAccumulators = (GetAccumulatedMouseDeltasAndResetAccumulatorsFn)(FindPattern("client.dll", "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 41 ? 49 8B F8"));
+	// actually the instruction is a MOV here 😇
+	m_rawinput_cvar = (int*)((uintptr_t)AddrFromLea((uintptr_t)oGetAccumulatedMouseDeltasAndResetAccumulators + 35) + 0x58);
+	/*
+	In client.dll:
+	Find CInput::JoyStickMove() by searching for the FLOAT (f32!!!) 14000.0.
+	Go to function that calls JoyStickMove() and bam you're inside CInput::ControllerMove()!
+	*/
+	oControllerMove = (ControllerMoveFn)(FindPattern("client.dll", "48 89 5C 24 ? 57 48 83 EC 30 80 B9 ? ? ? ? 00 49 8B F8"));
+	/*
+	- Find CInput vtable with CInput::ActivateMouse() via winapi SystemParametersInfoA.
+	- Go up 2 functions in the table to find CInput::IN_SetSampleTime()
+	*/
+	//oIn_SetSampleTime = (In_SetSampleTimeFn)(FindPattern("client.dll", "cc f3 0f 11 49 ? c3 cc") + 1);
+	oIn_SetSampleTime = (In_SetSampleTimeFn)(FindPattern("client.dll", "f3 0f 11 49 20 c3"));
 #endif
 
 #if DO_FASTDL_THINGS
