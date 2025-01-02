@@ -2,7 +2,7 @@
 #define DO_RAWINPUT2 0
 #define DO_FASTDL_THINGS 0
 #define DO_FULLSCREEN_PATCH 0
-#define DO_VIEWPUNCH_PATCH 0
+#define DO_VIEWPUNCH_PATCH 1
 #define TESTING_ON_TF2 1
 
 #define _CRT_SECURE_NO_WARNINGS
@@ -749,7 +749,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 	// Search for "scripts/HudLayout.res" & get the function that's calling something with a "CHudChat" string at the top...
 	auto ClientModeShared_Init = FindPattern("client.dll", "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 30 48 8B F1 48 8D 15");
 	// imagine doing this instead of getting p_gClientMode & the m_pChatElement offset lol...
-	auto gHUD = (void*)(ClientModeShared_Init + 32 + *(int32_t*)(ClientModeShared_Init + 28)); // read the rip+address from the LEA
+	auto gHUD = AddrFromLea(ClientModeShared_Init + 25);
 	// search for "Could not find Hud Element: %s"
 	CHud_FindElement = (CHud_FindElementFn)FindPattern("client.dll", "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 33 DB 48 8B EA 48 8B F9 39 59");
 	// look for the function that uses "Console"
@@ -785,16 +785,27 @@ DWORD InjectionEntryPoint(DWORD processID)
 #endif
 
 #if DO_VIEWPUNCH_PATCH
-	BYTE prleNew[6] = { 0x5e,   0x5f,   0x5d,   0xc2, 0x04, 0x00 }; // pop esi ; pop edi ; pop ebp ; ret 0x4
-	BYTE prleOriginal[6];
-	auto pFuckPlayerRoughLandingEffects = reinterpret_cast<void*>(FindPattern("client.dll", "55 8B EC F3 0F 10 45 ? 0F 2F 05 ? ? ? ? 57") + 73 /* after ->PlayStepSound */);
+	BYTE prleNew[6] = { 0x48, 0x83, 0xc4, 0x40,    0x5f,    0xc3 }; // add rsp, 0x40 ; pop rdi ; ret
+	BYTE prleOriginal[6]{};
+	// Search for the DOUBLE (f64!!!) 0.013 and then go to the function that references it.
+	auto pFuckPlayerRoughLandingEffects = reinterpret_cast<void*>(FindPattern("client.dll", "40 57 48 83 EC 40 0F 57 C0") + 84 /* after ->PlayStepSound */);
 	memcpy(prleOriginal, pFuckPlayerRoughLandingEffects, sizeof(prleOriginal));
 	DWORD pFuckPlayerRoughtLandingEffectsOriginalProtect;
 	VirtualProtect(pFuckPlayerRoughLandingEffects, sizeof(prleOriginal), PAGE_EXECUTE_READWRITE, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
 	memcpy(pFuckPlayerRoughLandingEffects, prleNew, sizeof(prleNew));
-	auto m_vecPunchAngle_RecvProp = (void**)((DWORD)GetModuleHandleA("client.dll") + 0x4c8c40);
-	auto m_vecPunchAngle_RecvProp_Original = m_vecPunchAngle_RecvProp[8];
-	m_vecPunchAngle_RecvProp[8] = RecvProxy_ZeroToVector;
+	/*
+	Search for "m_vecPunchAngle" to find the DT_Local init function.
+	   1801ecd70 48 8d 15        LEA        RDX,[s_m_vecPunchAngle_180b04698]                = "m_vecPunchAngle"
+				 21 79 91 00
+	   1801ecd77 48 8d 0d        LEA        RCX,[RecvProp_m_vecPunchAngle]
+				 32 4b e7 00
+	   1801ecd7e e8 cd 59        CALL       FUN_180262750                                    undefined FUN_180262750(undefine
+				 07 00
+	Grab the instruction-signature of the second LEA
+	*/
+	auto m_vecPunchAngle_RecvProp = (void**)AddrFromLea(FindPattern("client.dll", "48 8D 0D ? ? ? ? E8 ? ? ? ? 44 8D 4E ? 48 89 7C 24 ? 41 B8 D0 00 00 00"));
+	auto m_vecPunchAngle_RecvProp_Original = m_vecPunchAngle_RecvProp[6];
+	m_vecPunchAngle_RecvProp[6] = RecvProxy_ZeroToVector;
 #endif
 
 	DetourTransactionBegin();
@@ -865,10 +876,10 @@ DWORD InjectionEntryPoint(DWORD processID)
 			{
 				if (fuckViewpunch) {
 					memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, sizeof(prleOriginal));
-					m_vecPunchAngle_RecvProp[8] = m_vecPunchAngle_RecvProp_Original;
+					m_vecPunchAngle_RecvProp[6] = m_vecPunchAngle_RecvProp_Original;
 				} else {
 					memcpy(pFuckPlayerRoughLandingEffects, prleNew, sizeof(prleOriginal));
-					m_vecPunchAngle_RecvProp[8] = RecvProxy_ZeroToVector;
+					m_vecPunchAngle_RecvProp[6] = RecvProxy_ZeroToVector;
 				}
 				fuckViewpunch = !fuckViewpunch;
 				CBaseHudChat_ChatPrintf(CHud_FindElement((void*)gHUD, "CHudChat"), 0, 0, "Viewpunch: %d", !fuckViewpunch);

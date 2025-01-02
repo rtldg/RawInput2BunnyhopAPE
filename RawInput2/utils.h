@@ -26,6 +26,13 @@ public:
 };
 
 
+void* AddrFromLea(uintptr_t start)
+{
+	auto offset = *(int32_t*)(start + 3);
+	auto rip = start + 7;
+	return (void*)((intptr_t)rip + offset);
+}
+
 DWORD GetPIDByName(const char* ProcName)
 {
 	PROCESSENTRY32 pe32;
