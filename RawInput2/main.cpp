@@ -771,10 +771,10 @@ DWORD InjectionEntryPoint(DWORD processID)
 	auto jumpPred = reinterpret_cast<void*>(FindPattern("client.dll", "") + 0);
 #endif
 	ConMsg("jumpPred = 0x%llx\n", jumpPred);
-	memcpy(jumpPredOriginalBytes, jumpPred, 6);
+	memcpy(jumpPredOriginalBytes, jumpPred, sizeof(jumpPredOriginalBytes));
 	DWORD jumpPredOriginalProtect;
-	VirtualProtect(jumpPred, 6, PAGE_EXECUTE_READWRITE, &jumpPredOriginalProtect);
-	memcpy(jumpPred, nopBuffer, 6);
+	VirtualProtect(jumpPred, sizeof(jumpPredOriginalBytes), PAGE_EXECUTE_READWRITE, &jumpPredOriginalProtect);
+	memcpy(jumpPred, nopBuffer, sizeof(nopBuffer));
 
 #if DO_FULLSCREEN_PATCH
 	auto pReleaseVideo = reinterpret_cast<void*>(FindPattern("engine.dll", "56 8B F1 8B 06 8B 40 ? FF D0 84 C0 75 ? 8B 06") + 12);
@@ -788,10 +788,10 @@ DWORD InjectionEntryPoint(DWORD processID)
 	BYTE prleNew[6] = { 0x5e,   0x5f,   0x5d,   0xc2, 0x04, 0x00 }; // pop esi ; pop edi ; pop ebp ; ret 0x4
 	BYTE prleOriginal[6];
 	auto pFuckPlayerRoughLandingEffects = reinterpret_cast<void*>(FindPattern("client.dll", "55 8B EC F3 0F 10 45 ? 0F 2F 05 ? ? ? ? 57") + 73 /* after ->PlayStepSound */);
-	memcpy(prleOriginal, pFuckPlayerRoughLandingEffects, 6);
+	memcpy(prleOriginal, pFuckPlayerRoughLandingEffects, sizeof(prleOriginal));
 	DWORD pFuckPlayerRoughtLandingEffectsOriginalProtect;
-	VirtualProtect(pFuckPlayerRoughLandingEffects, 2, PAGE_EXECUTE_READWRITE, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
-	memcpy(pFuckPlayerRoughLandingEffects, prleNew, 6);
+	VirtualProtect(pFuckPlayerRoughLandingEffects, sizeof(prleOriginal), PAGE_EXECUTE_READWRITE, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
+	memcpy(pFuckPlayerRoughLandingEffects, prleNew, sizeof(prleNew));
 	auto m_vecPunchAngle_RecvProp = (void**)((DWORD)GetModuleHandleA("client.dll") + 0x4c8c40);
 	auto m_vecPunchAngle_RecvProp_Original = m_vecPunchAngle_RecvProp[8];
 	m_vecPunchAngle_RecvProp[8] = RecvProxy_ZeroToVector;
@@ -837,9 +837,9 @@ DWORD InjectionEntryPoint(DWORD processID)
 			if (msg.message == WM_HOTKEY && msg.wParam == 1)
 			{
 				if (jumpPredPatched)
-					memcpy(jumpPred, jumpPredOriginalBytes, 6);
+					memcpy(jumpPred, jumpPredOriginalBytes, sizeof(jumpPredOriginalBytes));
 				else
-					memcpy(jumpPred, nopBuffer, 6);
+					memcpy(jumpPred, nopBuffer, sizeof(nopBuffer));
 				jumpPredPatched = !jumpPredPatched;
 				CBaseHudChat_ChatPrintf(CHud_FindElement((void*)gHUD, "CHudChat"), 0, 0, "BunnyhopAPE: %d", jumpPredPatched);
 			}
@@ -864,10 +864,10 @@ DWORD InjectionEntryPoint(DWORD processID)
 			else if (msg.message == WM_HOTKEY && msg.wParam == 3)
 			{
 				if (fuckViewpunch) {
-					memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, 6);
+					memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, sizeof(prleOriginal));
 					m_vecPunchAngle_RecvProp[8] = m_vecPunchAngle_RecvProp_Original;
 				} else {
-					memcpy(pFuckPlayerRoughLandingEffects, prleNew, 6);
+					memcpy(pFuckPlayerRoughLandingEffects, prleNew, sizeof(prleOriginal));
 					m_vecPunchAngle_RecvProp[8] = RecvProxy_ZeroToVector;
 				}
 				fuckViewpunch = !fuckViewpunch;
@@ -880,9 +880,9 @@ DWORD InjectionEntryPoint(DWORD processID)
 	}
 
 #if DO_VIEWPUNCH_PATCH
-	memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, 6);
+	memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, sizeof(prleOriginal));
 	m_vecPunchAngle_RecvProp[8] = m_vecPunchAngle_RecvProp_Original;
-	VirtualProtect(pFuckPlayerRoughLandingEffects, 6, pFuckPlayerRoughtLandingEffectsOriginalProtect, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
+	VirtualProtect(pFuckPlayerRoughLandingEffects, sizeof(prleOriginal), pFuckPlayerRoughtLandingEffectsOriginalProtect, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
 #endif
 #if DO_FULLSCREEN_PATCH
 	memcpy(pReleaseVideo, "\x75", 1);
@@ -890,8 +890,8 @@ DWORD InjectionEntryPoint(DWORD processID)
 	VirtualProtect(pReleaseVideo, 1, pReleaseVideoOriginalProtect, &pReleaseVideoOriginalProtect);
 	VirtualProtect(pFUCKD3D9, 2, pFUCKD3D9OriginalProtect, &pFUCKD3D9OriginalProtect);
 #endif
-	memcpy(jumpPred, jumpPredOriginalBytes, 6);
-	VirtualProtect(jumpPred, 6, jumpPredOriginalProtect, &jumpPredOriginalProtect);
+	memcpy(jumpPred, jumpPredOriginalBytes, sizeof(jumpPredOriginalBytes));
+	VirtualProtect(jumpPred, sizeof(jumpPredOriginalBytes), jumpPredOriginalProtect, &jumpPredOriginalProtect);
 
 	DetourTransactionBegin();
 	DetourUpdateThread(GetCurrentThread());
