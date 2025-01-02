@@ -76,14 +76,17 @@ typedef void(__thiscall* CHLClient_LevelInitPreEntityFn)(void*, const char*);
 CHLClient_LevelInitPreEntityFn oCHLClient_LevelInitPreEntity;
 #endif
 
-// NOTE: __thiscall for the typedefs so the original function is called correctly.
-//       __fastcall for the hook function because msvc won't let you use thiscall outside of member declarations...
-//       thiscall = ecx, then stack
-//       fastcall = ecx, edx, then stack. That's why the fastcall funcs have a void* edx argument.
-//         (so we have the rest of the parameters be on stack and then ignore edx)
+// https://en.wikipedia.org/wiki/X86_calling_conventions#Microsoft_x64_calling_convention
 
 typedef void(__cdecl* ConMsgFn)(const char*, ...);
 ConMsgFn ConMsg;
+
+typedef void* (__fastcall* CHud_FindElementFn)(void* pThis, const char* name);
+CHud_FindElementFn CHud_FindElement;
+
+typedef void(__cdecl* CBaseHudChat_ChatPrintfFn)(void* pThis, int client, int filter, const char* fmt, ...);
+CBaseHudChat_ChatPrintfFn CBaseHudChat_ChatPrintf;
+
 
 #if DO_RAWINPUT2
 typedef double(__cdecl* Plat_FloatTimeFn)();
@@ -742,6 +745,17 @@ DWORD InjectionEntryPoint(DWORD processID)
 
 	uintptr_t tier = (uintptr_t)GetModuleHandleA("tier0.dll");
 	ConMsg = (ConMsgFn)(uintptr_t)GetProcAddress((HMODULE)tier, "?ConMsg@@YAXPEBDZZ");
+
+	// Search for "scripts/HudLayout.res" & get the function that's calling something with a "CHudChat" string at the top...
+	auto ClientModeShared_Init = FindPattern("client.dll", "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 30 48 8B F1 48 8D 15");
+	// imagine doing this instead of getting p_gClientMode & the m_pChatElement offset lol...
+	auto gHUD = (void*)(ClientModeShared_Init + 32 + *(int32_t*)(ClientModeShared_Init + 28)); // read the rip+address from the LEA
+	// search for "Could not find Hud Element: %s"
+	CHud_FindElement = (CHud_FindElementFn)FindPattern("client.dll", "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 33 DB 48 8B EA 48 8B F9 39 59");
+	// look for the function that uses "Console"
+	CBaseHudChat_ChatPrintf = (CBaseHudChat_ChatPrintfFn)FindPattern("client.dll", "4C 89 4C 24 ? 48 89 4C 24 ? 55 53");
+
+
 #if DO_RAWINPUT2
 	Plat_FloatTime = (Plat_FloatTimeFn)(uintptr_t)GetProcAddress((HMODULE)tier, "Plat_FloatTime");
 #endif
@@ -827,7 +841,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 				else
 					memcpy(jumpPred, nopBuffer, 6);
 				jumpPredPatched = !jumpPredPatched;
-				ConMsg("BunnyhopAPE: %d\n", jumpPredPatched);
+				CBaseHudChat_ChatPrintf(CHud_FindElement((void*)gHUD, "CHudChat"), 0, 0, "BunnyhopAPE: %d", jumpPredPatched);
 			}
 #if DO_FULLSCREEN_PATCH
 			else if (msg.message == WM_HOTKEY && msg.wParam == 2)
@@ -843,7 +857,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 					memcpy(pFUCKD3D9, "\x90\xE9", 2);
 				}
 				fullScreenPatched = !fullScreenPatched;
-				ConMsg("Fullscreen hook: %d\n", fullScreenPatched);
+				CBaseHudChat_ChatPrintf(CHud_FindElement((void*)gHUD, "CHudChat"), 0, 0, "Fullscreen hook: %d", fullScreenPatched);
 			}
 #endif
 #if DO_VIEWPUNCH_PATCH
@@ -857,7 +871,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 					m_vecPunchAngle_RecvProp[8] = RecvProxy_ZeroToVector;
 				}
 				fuckViewpunch = !fuckViewpunch;
-				ConMsg("Viewpunch: %d\n", !fuckViewpunch);
+				CBaseHudChat_ChatPrintf(CHud_FindElement((void*)gHUD, "CHudChat"), 0, 0, "Viewpunch: %d", !fuckViewpunch);
 			}
 #endif
 		}
@@ -1046,7 +1060,7 @@ std::string GetCSSLaunchOptions(std::string const & steampath, std::string const
 			line = ReplaceString(line, "\\\\", "\\");
 			return line;
 		}
-#if 1
+#if 0
 		// You're not going to believe it but this section is required to not crash when spawning in.
 		for (int i = 0; i < 5; i++)
 			(void)GetCurrentProcessId();
