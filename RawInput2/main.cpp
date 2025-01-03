@@ -199,17 +199,18 @@ bool GetRawMouseAccumulators(int& accumX, int& accumY, double frame_split)
 	return *(bool*)m_bRawInputSupported;
 }
 
+__declspec(noinline)
 void GetAccumulatedMouseDeltasAndResetAccumulators(CInput* thisptr, float* mx, float* my, float frametime)
 {
 	//Assert(mx);
 	//Assert(my);
 
-	static float* m_flAccumulatedMouseXMovement = (float*)((uintptr_t)thisptr + 0xc);
-	static float* m_flAccumulatedMouseYMovement = (float*)((uintptr_t)thisptr + 0x10);
+	float* m_flAccumulatedMouseXMovement = (float*)((uintptr_t)thisptr + 0xc);
+	float* m_flAccumulatedMouseYMovement = (float*)((uintptr_t)thisptr + 0x10);
 
 	int m_rawinput = *m_rawinput_cvar;
 
-	//ConMsg("GetAccumulatedMouseDeltasAndResetAccumulators: %.3f | %.3f | %d\n", *(float*)m_flAccumulatedMouseXMovement, *(float*)m_flAccumulatedMouseYMovement, m_rawinput);
+	ConMsg("GetAccumulatedMouseDeltasAndResetAccumulators: %.3f | %.3f | %d\n", *(float*)m_flAccumulatedMouseXMovement, *(float*)m_flAccumulatedMouseYMovement, m_rawinput);
 
 	if (m_flMouseSampleTime > 0.0)
 	{
@@ -717,9 +718,64 @@ DWORD InjectionEntryPoint(DWORD processID)
 	Use the g_InputSystem value we found and then search for references where they use the vtable byte offset for GetRawMouseAccumulators() again!
 	It was one of the last references for me.
 	*/
+	/*
+	Also the call to GetAccumulatedMouseDeltasAndResetAccumulators that matters is inlined inside of CInput::MouseMove() so that's annoying....
+
+	*/
 	oGetAccumulatedMouseDeltasAndResetAccumulators = (GetAccumulatedMouseDeltasAndResetAccumulatorsFn)(FindPattern("client.dll", "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 41 ? 49 8B F8"));
 	// actually the instruction is a MOV here 😇
 	m_rawinput_cvar = (int*)((uintptr_t)AddrFromLea((uintptr_t)oGetAccumulatedMouseDeltasAndResetAccumulators + 35) + 0x20);
+	/*
+	Thunk:
+		push rax
+		push rcx
+		push rdx
+		push r8
+		push r9
+		push r10
+		push r11
+		push rbp
+
+		mov rbp, rsp
+		sub rsp, 64
+		and rsp, -32
+
+		lea rdx, [rsp+0]
+		lea r8, [rsp+16]
+
+		sub rsp, 32
+
+		mov rcx, rbx
+		mov rax, Hooked_GetAccumulatedMouseDeltasAndResetAccumulators_FullAddress ;;;;;; HOOK VERSION!!!!
+		; rcx = this
+		; rdx = mx address
+		; r8 = my address
+		call rax
+
+		add rsp, 32
+
+		movss xmm7, [rsp+0]
+		movss xmm6, [rsp+16]
+
+		mov rsp, rbp
+
+		pop rbp
+		pop r11
+		pop r10
+		pop r9
+		pop r8
+		pop rdx
+		pop rcx
+		pop rax
+	*/
+	char patch[89+1] = "\x50\x51\x52\x41\x50\x41\x51\x41\x52\x41\x53\x55\x48\x89\xE5\x48\x83\xEC\x40\x48\x83\xE4\xE0\x48\x8D\x14\x24\x4C\x8D\x44\x24\x10\x48\x83\xEC\x20\x48\x89\xD9\x48\xB8\x11\x11\x11\x11\x11\x11\x11\x11\xFF\xD0\x48\x83\xC4\x20\xF3\x0F\x10\x3C\x24\xF3\x0F\x10\x74\x24\x10\x48\x89\xEC\x5D\x41\x5B\x41\x5A\x41\x59\x41\x58\x5A\x59\x58\x90\x90\x90\x90\x90\x90\x90\x90";
+	*(void**)(patch + 41) = Hooked_GetAccumulatedMouseDeltasAndResetAccumulators;
+	char GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original[89]{};
+	auto GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove = (void*)FindPattern("client.dll", "48 8B 05 ? ? ? ? F3 44 0F 10 43");
+	DWORD GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_protect;
+	VirtualProtect(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove, sizeof(patch) - 1, PAGE_EXECUTE_READWRITE, &GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_protect);
+	memcpy(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original, GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove, sizeof(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original));
+	memcpy(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove, patch, sizeof(patch) - 1);
 	/*
 	In client.dll:
 	Find CInput::JoyStickMove() by searching for the FLOAT (f32!!!) 14000.0.
@@ -922,6 +978,11 @@ DWORD InjectionEntryPoint(DWORD processID)
 
 		//Sleep(55);
 	}
+
+#if DO_RAWINPUT2
+	VirtualProtect(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove, sizeof(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original) - 1, GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_protect, &GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_protect);
+	memcpy(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove, GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original, sizeof(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original) - 1);
+#endif
 
 #if DO_VIEWPUNCH_PATCH
 	memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, sizeof(prleOriginal));
