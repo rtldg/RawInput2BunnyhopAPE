@@ -719,7 +719,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 	*/
 	oGetAccumulatedMouseDeltasAndResetAccumulators = (GetAccumulatedMouseDeltasAndResetAccumulatorsFn)(FindPattern("client.dll", "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 41 ? 49 8B F8"));
 	// actually the instruction is a MOV here 😇
-	m_rawinput_cvar = (int*)((uintptr_t)AddrFromLea((uintptr_t)oGetAccumulatedMouseDeltasAndResetAccumulators + 35) + 0x58);
+	m_rawinput_cvar = (int*)((uintptr_t)AddrFromLea((uintptr_t)oGetAccumulatedMouseDeltasAndResetAccumulators + 35) + 0x20);
 	/*
 	In client.dll:
 	Find CInput::JoyStickMove() by searching for the FLOAT (f32!!!) 14000.0.
