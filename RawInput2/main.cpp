@@ -727,16 +727,16 @@ DWORD InjectionEntryPoint(DWORD processID)
 	m_rawinput_cvar = (int*)((uintptr_t)AddrFromLea((uintptr_t)oGetAccumulatedMouseDeltasAndResetAccumulators + 35) + 0x20);
 	/*
 	Thunk:
-		push rax
 		push rcx
 		push rdx
 		push r8
 		push r9
 		push r10
 		push r11
-		push rbp
 
-		mov rbp, rsp
+		push r15
+		mov r15, rsp
+
 		sub rsp, 64
 		and rsp, -32
 
@@ -746,29 +746,26 @@ DWORD InjectionEntryPoint(DWORD processID)
 		sub rsp, 32
 
 		mov rcx, rbx
-		mov rax, Hooked_GetAccumulatedMouseDeltasAndResetAccumulators_FullAddress ;;;;;; HOOK VERSION!!!!
-		; rcx = this
-		; rdx = mx address
-		; r8 = my address
+		mov rax, 0x1111111111111111
+		// rcx = this
+		// rdx = 'mx' address
+		// r8  = 'my' address
 		call rax
 
-		add rsp, 32
+		movss xmm8, [rsp+32]
+		movss xmm9, [rsp+48]
 
-		movss xmm7, [rsp+0]
-		movss xmm6, [rsp+16]
+		mov rsp, r15
+		pop r15
 
-		mov rsp, rbp
-
-		pop rbp
 		pop r11
 		pop r10
 		pop r9
 		pop r8
 		pop rdx
 		pop rcx
-		pop rax
 	*/
-	char patch[89+1] = "\x50\x51\x52\x41\x50\x41\x51\x41\x52\x41\x53\x55\x48\x89\xE5\x48\x83\xEC\x40\x48\x83\xE4\xE0\x48\x8D\x14\x24\x4C\x8D\x44\x24\x10\x48\x83\xEC\x20\x48\x89\xD9\x48\xB8\x11\x11\x11\x11\x11\x11\x11\x11\xFF\xD0\x48\x83\xC4\x20\xF3\x0F\x10\x3C\x24\xF3\x0F\x10\x74\x24\x10\x48\x89\xEC\x5D\x41\x5B\x41\x5A\x41\x59\x41\x58\x5A\x59\x58\x90\x90\x90\x90\x90\x90\x90\x90";
+	char patch[89+1] = "\x51\x52\x41\x50\x41\x51\x41\x52\x41\x53\x41\x57\x49\x89\xE7\x48\x83\xEC\x40\x48\x83\xE4\xE0\x48\x8D\x14\x24\x4C\x8D\x44\x24\x10\x48\x83\xEC\x20\x48\x89\xD9\x48\xB8\x11\x11\x11\x11\x11\x11\x11\x11\xFF\xD0\xF3\x44\x0F\x10\x44\x24\x20\xF3\x44\x0F\x10\x4C\x24\x30\x4C\x89\xFC\x41\x5F\x41\x5B\x41\x5A\x41\x59\x41\x58\x5A\x59\x90\x90\x90\x90\x90\x90\x90\x90\x90";
 	*(void**)(patch + 41) = Hooked_GetAccumulatedMouseDeltasAndResetAccumulators;
 	char GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original[89]{};
 	auto GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove = (void*)FindPattern("client.dll", "48 8B 05 ? ? ? ? F3 44 0F 10 43");
