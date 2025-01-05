@@ -1,7 +1,7 @@
 
 #define DO_RAWINPUT2 1
 #define DO_FASTDL_THINGS 0
-#define DO_FULLSCREEN_PATCH 0
+#define DO_FULLSCREEN_PATCH 1
 #define DO_VIEWPUNCH_PATCH 1
 #define TESTING_ON_TF2 1
 
@@ -863,8 +863,23 @@ DWORD InjectionEntryPoint(DWORD processID)
 	memcpy(jumpPred, nopBuffer, sizeof(nopBuffer));
 
 #if DO_FULLSCREEN_PATCH
-	auto pReleaseVideo = reinterpret_cast<void*>(FindPattern("engine.dll", "56 8B F1 8B 06 8B 40 ? FF D0 84 C0 75 ? 8B 06") + 12);
-	auto pFUCKD3D9 = reinterpret_cast<void*>(FindPattern("d3d9.dll", "0F 84 ? ? ? ? 6A 07 FF B3"));
+	// Find CVideoMode_MaterialSystem::RestoreVideo() by searching for winapi the `ShowWindow(hwnd,6);` (SW_MINIMIZE) call.
+	// Then try scroll up to the previous function in the assembly... and hopefully you found ::ReleaseVideo()...
+	auto pReleaseVideo = (void*)(FindPattern("engine.dll", "40 53 48 83 EC 20 48 8B 01 48 8B D9 FF 90 ? ? ? ? 84 C0 75 ? 48 8B 03 48 8B CB 48 83 C4 20 5B 48 FF A0 ? ? ? ? 48 83 C4 20 5B C3") + 20);
+	/*
+	Find this (by searching for the ShowWindow(hwnd,7) call):
+		if (((*(uint *)(*(longlong *)(param_1 + 0x10) + 0x78) & 0x800) == 0) && (param_2 != 0)) {
+		  DAT_1801b9348 = DAT_1801b9348 | 0x40;
+		  FUN_180007828(param_1);
+		  BVar4 = IsWindowVisible(*(HWND *)(param_1 + 0x1d8));
+		  if ((BVar4 != 0) && (bVar2)) {
+			ShowWindow(*(HWND *)(param_1 + 0x1d8),7);
+		  }
+		  DAT_1801b9348 = DAT_1801b9348 & 0xffffffbf;
+		}
+	And get the sig of the jz instruction around the ShowWindow(hwnd,7) call.
+	*/
+	auto pFUCKD3D9 = (void*)FindPattern("d3d9.dll", "0F 84 ? ? ? ? 48 8B 8B ? ? ? ? BA 07 00 00 00");
 	DWORD pReleaseVideoOriginalProtect, pFUCKD3D9OriginalProtect;
 	VirtualProtect(pReleaseVideo, 1, PAGE_EXECUTE_READWRITE, &pReleaseVideoOriginalProtect);
 	VirtualProtect(pFUCKD3D9, 2, PAGE_EXECUTE_READWRITE, &pFUCKD3D9OriginalProtect);
