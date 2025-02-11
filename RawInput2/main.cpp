@@ -508,7 +508,7 @@ void __fastcall Hooked_CDownloadManager_Queue(void* thisptr, void* edx, char* sv
 		char urlbuf[256], filebuf[256];
 		_snprintf(filebuf, sizeof(filebuf), "maps/%s.bsp", g_matching_map_sha1);
 		_snprintf(urlbuf, sizeof(urlbuf), "hashed/%s.bsp", g_matching_map_sha1);
-		oCDownloadManager_Queue(thisptr, "http://main.fastdl.me/", urlbuf, filebuf);
+		oCDownloadManager_Queue(thisptr, "https://main.fastdl.me/", urlbuf, filebuf);
 	}
 	else
 	{
@@ -530,7 +530,7 @@ void __fastcall Hooked_CDownloadManager_CheckActiveDownload(struct dlman_t* this
 
 			char urlbuf[256];
 			_snprintf(urlbuf, sizeof(urlbuf), "hashed/%s.bsp", g_matching_map_sha1);
-			oCDownloadManager_Queue(thisptr, "http://main.fastdl.me/", urlbuf, thisptr->req->urlpath);
+			oCDownloadManager_Queue(thisptr, "https://main.fastdl.me/", urlbuf, thisptr->req->urlpath);
 			//MessageBoxA(0, thisptr->req->urlpath, urlbuf, MB_OK);
 		}
 	}
