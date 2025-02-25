@@ -3,7 +3,6 @@
 #define DO_FASTDL_THINGS 0
 #define DO_FULLSCREEN_PATCH 1
 #define DO_VIEWPUNCH_PATCH 1
-#define TESTING_ON_TF2 1
 
 #define _CRT_SECURE_NO_WARNINGS
 #include <Windows.h>
@@ -210,7 +209,7 @@ void GetAccumulatedMouseDeltasAndResetAccumulators(CInput* thisptr, float* mx, f
 
 	int m_rawinput = *m_rawinput_cvar;
 
-	ConMsg("GetAccumulatedMouseDeltasAndResetAccumulators: %.3f | %.3f | %d\n", *(float*)m_flAccumulatedMouseXMovement, *(float*)m_flAccumulatedMouseYMovement, m_rawinput);
+	//ConMsg("GetAccumulatedMouseDeltasAndResetAccumulators: %.3f | %.3f | %d\n", *(float*)m_flAccumulatedMouseXMovement, *(float*)m_flAccumulatedMouseYMovement, m_rawinput);
 
 	if (m_flMouseSampleTime > 0.0)
 	{
@@ -680,18 +679,10 @@ DWORD InjectionEntryPoint(DWORD processID)
 
 	// Search for CallWindowProc[A] in inputsystem.dll. You should find it called from `CInputSystem::ChainWindowMessage()` (which is called by `CInputSystem::WindowProc()`).
 	// On x64 (and maybe x32) you'll probably find `ChainWindowMessage` inlined into `CInputSystem::WindowProc()`.
-#if TESTING_ON_TF2
 	oWindowProc = (WindowProcFn)(FindPattern("inputsystem.dll", "44 89 44 24 ? 48 89 54 24"));
-#else
-	oWindowProc = (WindowProcFn)(FindPattern("inputsystem.dll", ""));
-#endif
 
 	// You can find this function by searching for the string that starts with "setpos_exact %f %f %f".
-#if TESTING_ON_TF2
 	oCHostState_OnClientConnected = (CHostState_OnClientConnectedFn)(FindPattern("engine.dll", "40 53 48 83 EC 60 80 B9 ? ? ? ? 00 48 8B D9 0F 84"));
-#else
-	oCHostState_OnClientConnected = (CHostState_OnClientConnectedFn)(FindPattern("engine.dll", ""));
-#endif
 
 #if DO_RAWINPUT2
 	auto inputsystem_factory = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("inputsystem.dll"), "CreateInterface"));
@@ -725,6 +716,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 	oGetAccumulatedMouseDeltasAndResetAccumulators = (GetAccumulatedMouseDeltasAndResetAccumulatorsFn)(FindPattern("client.dll", "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 41 ? 49 8B F8"));
 	// actually the instruction is a MOV here 😇
 	m_rawinput_cvar = (int*)((uintptr_t)AddrFromLea((uintptr_t)oGetAccumulatedMouseDeltasAndResetAccumulators + 35) + 0x20);
+	// TODO: This is AWFUL!!!! Will probably break one day... just use Safetyhook inline/mid-function hooks when that happens and hope for the best lol...
 	/*
 	Thunk:
 		push rcx
@@ -850,22 +842,22 @@ DWORD InjectionEntryPoint(DWORD processID)
 
 	BYTE nopBuffer[6] = { 0x90,0x90,0x90,0x90,0x90,0x90 };
 	BYTE jumpPredOriginalBytes[6];
-	// Search for the float32 268.3281572999747 in client.dll and then find the `// don't pogo stick` if-statement
-#if TESTING_ON_TF2
-	auto jumpPred = reinterpret_cast<void*>(FindPattern("client.dll", "F6 40 ? 02 0F 85 ? ? ? ? 80 B9 ? ? ? ? 00") + 4);
-#else
-	auto jumpPred = reinterpret_cast<void*>(FindPattern("client.dll", "") + 0);
-#endif
+	// Search for float64 (DOUBLE!!) 301.993377410829964447 to find the place where sv_autobunnyhopping & the `// don't pogo stick` if-statment used to be...
+	// Might be easier to follow the sv_autobunnyhopping cvar than this f64 but whatever...
+	//  then sig the `TEST byte ptr [REGISTER + 0xOFFSET], 0x2` instruction.
+	auto jumpPred = reinterpret_cast<void*>(FindPattern("client.dll", "F6 40 ? 02 75 ? 48 8B 05"));
 	ConMsg("jumpPred = 0x%llx\n", jumpPred);
 	memcpy(jumpPredOriginalBytes, jumpPred, sizeof(jumpPredOriginalBytes));
 	DWORD jumpPredOriginalProtect;
 	VirtualProtect(jumpPred, sizeof(jumpPredOriginalBytes), PAGE_EXECUTE_READWRITE, &jumpPredOriginalProtect);
-	memcpy(jumpPred, nopBuffer, sizeof(nopBuffer));
+	//memcpy(jumpPred, nopBuffer, sizeof(nopBuffer));
 
 #if DO_FULLSCREEN_PATCH
-	// Find CVideoMode_MaterialSystem::RestoreVideo() by searching for winapi the `ShowWindow(hwnd,6);` (SW_MINIMIZE) call.
-	// Then try scroll up to the previous function in the assembly... and hopefully you found ::ReleaseVideo()...
+	// Search for `ShowWindow(hwnd,6);` (SW_MINIMIZE) call to find CVideoMode_MaterialSystem::ReleaseVideo() (with an inlined ReleaseFullScreen).
+	// Add X bytes to get to the first JNZ...
 	auto pReleaseVideo = (void*)(FindPattern("engine.dll", "40 53 48 83 EC 20 48 8B 01 48 8B D9 FF 90 ? ? ? ? 84 C0 75 ? 48 8B 03 48 8B CB 48 83 C4 20 5B 48 FF A0 ? ? ? ? 48 83 C4 20 5B C3") + 20);
+	DWORD pReleaseVideoOriginalProtect;
+	VirtualProtect(pReleaseVideo, 1, PAGE_EXECUTE_READWRITE, &pReleaseVideoOriginalProtect);
 	/*
 	Find this (by searching for the ShowWindow(hwnd,7) call):
 		if (((*(uint *)(*(longlong *)(param_1 + 0x10) + 0x78) & 0x800) == 0) && (param_2 != 0)) {
@@ -880,8 +872,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 	And get the sig of the jz instruction around the ShowWindow(hwnd,7) call.
 	*/
 	auto pFUCKD3D9 = (void*)FindPattern("d3d9.dll", "0F 84 ? ? ? ? 48 8B 8B ? ? ? ? BA 07 00 00 00");
-	DWORD pReleaseVideoOriginalProtect, pFUCKD3D9OriginalProtect;
-	VirtualProtect(pReleaseVideo, 1, PAGE_EXECUTE_READWRITE, &pReleaseVideoOriginalProtect);
+	DWORD pFUCKD3D9OriginalProtect;
 	VirtualProtect(pFUCKD3D9, 2, PAGE_EXECUTE_READWRITE, &pFUCKD3D9OriginalProtect);
 #endif
 
@@ -934,7 +925,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 #endif
 	DetourTransactionCommit();
 
-	bool jumpPredPatched = true;
+	bool jumpPredPatched = false;
 	bool fullScreenPatched = false;
 	bool fuckViewpunch = true;
 
@@ -983,7 +974,7 @@ DWORD InjectionEntryPoint(DWORD processID)
 					m_vecPunchAngle_RecvProp[6] = RecvProxy_ZeroToVector;
 				}
 				fuckViewpunch = !fuckViewpunch;
-				CBaseHudChat_ChatPrintf(CHud_FindElement((void*)gHUD, "CHudChat"), 0, 0, "Viewpunch: %d", !fuckViewpunch);
+				CBaseHudChat_ChatPrintf(CHud_FindElement((void*)gHUD, "CHudChat"), 0, 0, "Viewpunch: %s", fuckViewpunch ? "BLOCKED" : "YES");
 			}
 #endif
 		}
@@ -1126,22 +1117,14 @@ std::string GetCSSPath(std::string const & steampath)
 			library_path = ReplaceString(library_path, "\\\\", "\\");
 		}
 
-#if TESTING_ON_TF2
-		if (line.rfind("\t\t\t\"440\"", 0) == 0)
-#else
 		if (line.rfind("\t\t\t\"240\"", 0) == 0)
-#endif
 		{
 			css_path = library_path;
 			break;
 		}
 	}
 	if (css_path != "")
-#if TESTING_ON_TF2
-		css_path += "\\steamapps\\common\\Team Fortress 2\\";
-#else
 		css_path += "\\steamapps\\common\\Counter-Strike Source\\";
-#endif
 	return css_path;
 }
 
@@ -1162,11 +1145,7 @@ std::string GetCSSLaunchOptions(std::string const & steampath, std::string const
 	bool in_css = false;
 	while (std::getline(localconfig, line))
 	{
-#if TESTING_ON_TF2
-		if (line.rfind("\t\t\t\t\t\"440\"", 0) == 0)
-#else
 		if (line.rfind("\t\t\t\t\t\"240\"", 0) == 0)
-#endif
 			in_css = true;
 		if (line.rfind("\t\t\t\t\t}", 0) == 0)
 			in_css = false;
@@ -1203,15 +1182,11 @@ int main()
 	auto steam_path = GetSteamPath();
 	printf("steampath = %s\n", steam_path.c_str());
 	auto launch_options = GetCSSLaunchOptions(steam_path, steamid3);
-	launch_options = "-steam -insecure -novid -console   " + launch_options;
+	launch_options = "-insecure -novid -console   " + launch_options;
 	printf("launchopt = %s\n", launch_options.c_str());
 	auto css_path = GetCSSPath(steam_path);
 	printf("css path  = %s\n\n", css_path.c_str());
-#if TESTING_ON_TF2
-	auto css_exe = css_path + "tf_win64.exe";
-#else
 	auto css_exe = css_path + "cstrike_win64.exe";
-#endif
 
 	PROCESS_INFORMATION pi = {};
 	STARTUPINFOA si = {};
@@ -1246,7 +1221,7 @@ int main()
 	}
 
 	//system("cls");
-	printf("Set \"m_rawinput 2\" in game for it to take effect\n\nPress F5 to toggle BunnyhopAPE autobhop prediction (on by default)\nPress F6 to toggle the fullscreen hook (you probably don't want this)\nPress F7 to toggle the viewpunch remover (e.g. from fall-damage) (on by default)\n");
+	printf("Set \"m_rawinput 2\" in game for it to take effect\n\nPress F5 to toggle BunnyhopAPE autobhop prediction (OFF by default)\n    (you shouldn't need this now that bhoptimer supports sv_autobunnyhopping)\nPress F6 to toggle the fullscreen hook (you probably don't want this)\nPress F7 to toggle the viewpunch remover (e.g. from fall-damage) (on by default)\n");
 
 	PEInjector(pi.hProcess, InjectionEntryPoint);
 
