@@ -22,7 +22,7 @@ Includes **BunnyhopAPE** from [alkatrazbhop](https://github.com/alkatrazbhop/Bun
 * Download the latest RawInput2BunnyhopAPE.exe from the [Releases](https://github.com/rtldg/RawInput2BunnyhopAPE/releases) page.
 * Run RawInput2BunnyhopAPE.exe
 * Make sure to set ``m_rawinput 2`` in game for it to take effect.
-* `F5` to toggle autohop prediction (on by default)
+* `F5` to toggle autohop prediction (OFF by default) (you shouldn't need this anymore now that bhoptimer supports sv_autobunnyhopping)
 * `F6` to toggle the fullscreen hook thing which keeps the game open in fullscreen when you alt-tab (which is nice if you have two monitors) (off by default)
 * `F7` to toggle the viewpunch remover. Basically a client-side [SuppressViewpunch](https://github.com/xen-000/SuppressViewpunch) (on by default)
 
