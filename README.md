@@ -1,3 +1,10 @@
+# NO-MAINTENANCE NOTE
+I'm not going to update this when it breaks. Consider these options (which include lagfix) someday:
+- Linux https://github.com/dowoge/RawInput2BunnyhopAPE/tree/linux
+- Windows https://github.com/bhopbhopbhop/RawInput2BunnyhopAPE-lagfix/releases
+
+Something something not an endorsement, something something run random .exe's at your own risk.
+
 ## RawInput2BunnyhopAPE
 
 ![main ui](https://github.com/rtldg/RawInput2BunnyhopAPE/assets/55846624/78b9702f-cf36-487d-8664-795863b9b3e8)
