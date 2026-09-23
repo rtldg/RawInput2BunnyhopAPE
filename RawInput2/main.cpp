@@ -1,7 +1,15 @@
+
+#define DO_RAWINPUT2 1
+#define DO_FASTDL_THINGS 0
+#define DO_FULLSCREEN_PATCH 1
+#define DO_VIEWPUNCH_PATCH 1
+
 #define _CRT_SECURE_NO_WARNINGS
 #include <Windows.h>
+#if DO_FASTDL_THINGS
 #include <urlmon.h> // URLDownloadToFileW
 #include <wininet.h> // DeleteUrlCacheEntryW
+#endif
 #include <fstream>
 #include <string>
 #include <conio.h>
@@ -9,26 +17,35 @@
 #include "utils.h"
 #include "Detours/src/detours.h"
 
+#if DO_FASTDL_THINGS
 #pragma comment(lib, "Urlmon.lib") // URLDownloadToFileW
 #pragma comment(lib, "Wininet.lib") // DeleteUrlCacheEntryW
 
 #define HAXOR_BSP_PERIODS 1
+#endif
 
+typedef void(__thiscall* CHostState_OnClientConnectedFn)(void*);
+CHostState_OnClientConnectedFn oCHostState_OnClientConnected;
+
+typedef LRESULT(__thiscall* WindowProcFn)(void*, HWND, UINT, WPARAM, LPARAM);
+WindowProcFn oWindowProc;
+
+#if DO_RAWINPUT2
 IInputSystem* g_InputSystem = nullptr;
-CInput* g_Input = nullptr;
+//CInput* g_Input = nullptr;
 
 typedef bool(__thiscall* GetRawMouseAccumulatorsFn)(void*, int&, int&);
-typedef LRESULT(__thiscall* WindowProcFn)(void*, HWND, UINT, WPARAM, LPARAM);
 typedef void(__thiscall* GetAccumulatedMouseDeltasAndResetAccumulatorsFn)(void*, float*, float*);
 typedef void(__thiscall* ControllerMoveFn)(void*, float, void*);
 typedef void(__thiscall* In_SetSampleTimeFn)(void*, float);
 
 GetRawMouseAccumulatorsFn oGetRawMouseAccumulators;
-WindowProcFn oWindowProc;
 GetAccumulatedMouseDeltasAndResetAccumulatorsFn oGetAccumulatedMouseDeltasAndResetAccumulators;
 ControllerMoveFn oControllerMove;
 In_SetSampleTimeFn oIn_SetSampleTime;
+#endif
 
+#if DO_FASTDL_THINGS
 typedef void(__thiscall* CDownloadManager_UpdateProgressBarFn)(void*);
 typedef void(__stdcall* CEngineVGui_UpdateCustomProgressBarFn)(float, const wchar_t*);
 typedef void(__thiscall* DownloadCache_PersistToDiskFn)(void*, void*);
@@ -41,14 +58,11 @@ DownloadCache_PersistToDiskFn oDownloadCache_PersistToDisk;
 DecompressBZipToDiskFn oDecompressBZipToDisk;
 BZ2_bzreadFn oBZ2_bzread;
 
-typedef void(__thiscall* CHostState_OnClientConnectedFn)(void*);
-CHostState_OnClientConnectedFn oCHostState_OnClientConnected;
-
 typedef bool(__thiscall* CClientState_ProcessServerInfoFn)(void*, void*);
 CClientState_ProcessServerInfoFn oCClientState_ProcessServerInfo;
 typedef bool(__stdcall* MD5_MapFileFn)(char* buf, const char* map);
 MD5_MapFileFn MD5_MapFile;
-typedef void(__thiscall* CDownloadManager_QueueFn)(void*, char*, char*, char*);
+typedef void(__thiscall* CDownloadManager_QueueFn)(void*, const char*, char*, char*);
 CDownloadManager_QueueFn oCDownloadManager_Queue;
 typedef void(__thiscall* CDownloadManager_CheckActiveDownloadFn)(void*);
 CDownloadManager_CheckActiveDownloadFn oCDownloadManager_CheckActiveDownload;
@@ -59,27 +73,36 @@ CDownloadManager_CheckActiveDownloadFn oCDownloadManager_CheckActiveDownload;
 //C_SoundscapeSystem_InitFn oC_SoundscapeSystem_Init;
 typedef void(__thiscall* CHLClient_LevelInitPreEntityFn)(void*, const char*);
 CHLClient_LevelInitPreEntityFn oCHLClient_LevelInitPreEntity;
+#endif
 
-// NOTE: __thiscall for the typedefs so the original function is called correctly.
-//       __fastcall for the hook function because msvc won't let you use thiscall outside of member declarations...
-//       thiscall = ecx, then stack
-//       fastcall = ecx, edx, then stack. That's why the fastcall funcs have a void* edx argument.
-//         (so we have the rest of the parameters be on stack and then ignore edx)
+// https://en.wikipedia.org/wiki/X86_calling_conventions#Microsoft_x64_calling_convention
 
 typedef void(__cdecl* ConMsgFn)(const char*, ...);
 ConMsgFn ConMsg;
 
+typedef void* (__fastcall* CHud_FindElementFn)(void* pThis, const char* name);
+CHud_FindElementFn CHud_FindElement;
+
+typedef void(__cdecl* CBaseHudChat_ChatPrintfFn)(void* pThis, int client, int filter, const char* fmt, ...);
+CBaseHudChat_ChatPrintfFn CBaseHudChat_ChatPrintf;
+
+
+#if DO_RAWINPUT2
 typedef double(__cdecl* Plat_FloatTimeFn)();
 Plat_FloatTimeFn Plat_FloatTime;
+
+int* m_rawinput_cvar;
 
 float mouseMoveFrameTime;
 
 double m_mouseSplitTime;
 double m_mouseSampleTime;
 float m_flMouseSampleTime;
+#endif
 
 DWORD haxorThreadID;
 
+#if DO_FASTDL_THINGS
 char* g_lump_checksums{};
 char g_matching_map_sha1[40+1]{};
 char g_server_lumps_md5_bytes[16]{};
@@ -111,12 +134,15 @@ struct dlman_t {
 	char _pre[0x14];
 	struct request_t* req;
 };
+#endif
 
+#if DO_RAWINPUT2
 bool GetRawMouseAccumulators(int& accumX, int& accumY, double frame_split)
 {
-	static int* m_mouseRawAccumX = (int*)((uintptr_t)g_InputSystem + 0x119C);
-	static int* m_mouseRawAccumY = (int*)((uintptr_t)g_InputSystem + 0x11A0);
-	static bool* m_bRawInputSupported = (bool*)((uintptr_t)g_InputSystem + 0x1198);
+	// You can get these offsets from inside CInputSystem::GetRawMouseAccumulators().
+	static int* m_mouseRawAccumX = (int*)((uintptr_t)g_InputSystem + 0x48dc);
+	static int* m_mouseRawAccumY = (int*)((uintptr_t)g_InputSystem + 0x48e0);
+	static bool* m_bRawInputSupported = (bool*)((uintptr_t)g_InputSystem + 0x48d8);
 
 	//ConMsg("GetRawMouseAccumulators: %d | %d | %d\n", *(int*)m_mouseRawAccumX, *(int*)m_mouseRawAccumY, *(bool*)m_bRawInputSupported);
 
@@ -172,16 +198,16 @@ bool GetRawMouseAccumulators(int& accumX, int& accumY, double frame_split)
 	return *(bool*)m_bRawInputSupported;
 }
 
-void GetAccumulatedMouseDeltasAndResetAccumulators(float* mx, float* my, float frametime)
+__declspec(noinline)
+void GetAccumulatedMouseDeltasAndResetAccumulators(CInput* thisptr, float* mx, float* my, float frametime)
 {
 	//Assert(mx);
 	//Assert(my);
 
-	static float* m_flAccumulatedMouseXMovement = (float*)((uintptr_t)g_Input + 0x8);
-	static float* m_flAccumulatedMouseYMovement = (float*)((uintptr_t)g_Input + 0xC);
+	float* m_flAccumulatedMouseXMovement = (float*)((uintptr_t)thisptr + 0xc);
+	float* m_flAccumulatedMouseYMovement = (float*)((uintptr_t)thisptr + 0x10);
 
-	static uintptr_t client = (uintptr_t)GetModuleHandle("client.dll");
-	int m_rawinput = *(int*)(client + 0x4F5EA0);
+	int m_rawinput = *m_rawinput_cvar;
 
 	//ConMsg("GetAccumulatedMouseDeltasAndResetAccumulators: %.3f | %.3f | %d\n", *(float*)m_flAccumulatedMouseXMovement, *(float*)m_flAccumulatedMouseYMovement, m_rawinput);
 
@@ -220,15 +246,16 @@ void GetAccumulatedMouseDeltasAndResetAccumulators(float* mx, float* my, float f
 	}
 }
 
-bool __fastcall Hooked_GetRawMouseAccumulators(void* thisptr, void* edx, int& accumX, int& accumY)
+bool __fastcall Hooked_GetRawMouseAccumulators(void* thisptr, int& accumX, int& accumY)
 {
 	return GetRawMouseAccumulators(accumX, accumY, 0.0);
 
 	//GetRawMouseAccumulators(accumX, accumY, 0.0);
 	//return oGetRawMouseAccumulators(thisptr, accumX, accumY);
 }
+#endif
 
-LRESULT __fastcall Hooked_WindowProc(void* thisptr, void* edx, HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+LRESULT __fastcall Hooked_WindowProc(void* thisptr, HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	//ConMsg("WindowProc: %.3f\n", m_mouseSampleTime);
 
@@ -236,7 +263,9 @@ LRESULT __fastcall Hooked_WindowProc(void* thisptr, void* edx, HWND hwnd, UINT u
 	{
 	case WM_INPUT:
 		{
+#if DO_RAWINPUT2
 			m_mouseSampleTime = Plat_FloatTime();
+#endif
 			break;
 		}
 	case WM_SYSKEYDOWN:
@@ -255,9 +284,10 @@ LRESULT __fastcall Hooked_WindowProc(void* thisptr, void* edx, HWND hwnd, UINT u
 	return oWindowProc(thisptr, hwnd, uMsg, wParam, lParam);
 }
 
-void __fastcall Hooked_GetAccumulatedMouseDeltasAndResetAccumulators(void* thisptr, void* edx, float* mx, float* my)
+#if DO_RAWINPUT2
+void __fastcall Hooked_GetAccumulatedMouseDeltasAndResetAccumulators(CInput* thisptr, float* mx, float* my)
 {
-	GetAccumulatedMouseDeltasAndResetAccumulators(mx, my, mouseMoveFrameTime);
+	GetAccumulatedMouseDeltasAndResetAccumulators(thisptr, mx, my, mouseMoveFrameTime);
 
 	mouseMoveFrameTime = 0.0;
 
@@ -266,22 +296,24 @@ void __fastcall Hooked_GetAccumulatedMouseDeltasAndResetAccumulators(void* thisp
 	//oGetAccumulatedMouseDeltasAndResetAccumulators(thisptr, mx, my);
 }
 
-void __fastcall Hooked_ControllerMove(void* thisptr, void* edx, float ft, void* cmd)
+void __fastcall Hooked_ControllerMove(void* thisptr, float ft, void* cmd)
 {
 	mouseMoveFrameTime = ft;
 
 	oControllerMove(thisptr, mouseMoveFrameTime, cmd);
 }
 
-void __fastcall Hooked_IN_SetSampleTime(void* thisptr, void* edx, float frametime)
+void __fastcall Hooked_IN_SetSampleTime(void* thisptr, float frametime)
 {
 	m_flMouseSampleTime = frametime;
 
 	oIn_SetSampleTime(thisptr, frametime);
 }
+#endif
 
+#if DO_FASTDL_THINGS
 static int downloadBytesCurrent, downloadBytesTotal, downloadShowBytes;
-void __fastcall Hooked_CDownloadManager_UpdateProgressBar(struct dlman_t* thisptr, void* edx)
+void __fastcall Hooked_CDownloadManager_UpdateProgressBar(struct dlman_t* thisptr)
 {
 	if (thisptr->req && thisptr->req->http)
 	{
@@ -350,6 +382,7 @@ int __stdcall Hooked_BZ2_bzread(int a, int b, int c)
 	}
 	return x;
 }
+#endif
 
 void __fastcall Hooked_CHostState_OnClientConnected(void* thisptr)
 {
@@ -357,6 +390,7 @@ void __fastcall Hooked_CHostState_OnClientConnected(void* thisptr)
 	FlashWindow(FindWindowA("Valve001", NULL), TRUE);
 }
 
+#if DO_FASTDL_THINGS
 void DownloadLumpChecksums()
 {
 	wchar_t lump_checksums[MAX_PATH];
@@ -602,6 +636,7 @@ void __fastcall Hooked_CHLClient_LevelInitPreEntity(void* thisptr, void* edx, co
 	char* end = max(strrchr(g_server_map, '/'), strrchr(g_server_map, '\\'));
 	return oCHLClient_LevelInitPreEntity(thisptr, end ? end + 1 : g_server_map);
 }
+#endif // DO_FASTDL_THINGS
 
 BOOL IsProcessRunning(DWORD processID)
 {
@@ -625,37 +660,131 @@ BOOL GetMessageWithTimeout(MSG* msg, UINT to)
 	return TRUE;
 }
 
+#if DO_VIEWPUNCH_PATCH
 void RecvProxy_ZeroToVector(const void* fuck1, void* fuck2, float* fuck3)
 {
 	for (int i = 0; i < 3; i++)
 		fuck3[i] = 0.0;
 }
+#endif
 
 DWORD InjectionEntryPoint(DWORD processID)
 {
 	LoadLibraryA("VCRUNTIME140.dll");
 
 	haxorThreadID = GetCurrentThreadId();
+#if DO_FASTDL_THINGS
 	ReadLumpChecksums();
+#endif
 
+	// Search for CallWindowProc[A] in inputsystem.dll. You should find it called from `CInputSystem::ChainWindowMessage()` (which is called by `CInputSystem::WindowProc()`).
+	// On x64 (and maybe x32) you'll probably find `ChainWindowMessage` inlined into `CInputSystem::WindowProc()`.
+	oWindowProc = (WindowProcFn)(FindPattern("inputsystem.dll", "44 89 44 24 ? 48 89 54 24"));
+
+	// You can find this function by searching for the string that starts with "setpos_exact %f %f %f".
+	oCHostState_OnClientConnected = (CHostState_OnClientConnectedFn)(FindPattern("engine.dll", "40 53 48 83 EC 60 80 B9 ? ? ? ? 00 48 8B D9 0F 84"));
+
+#if DO_RAWINPUT2
 	auto inputsystem_factory = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("inputsystem.dll"), "CreateInterface"));
 	g_InputSystem = reinterpret_cast<IInputSystem*>(inputsystem_factory("InputSystemVersion001", nullptr));
-	g_Input = **reinterpret_cast<CInput***>(FindPattern("client.dll", "8B 0D ? ? ? ? 8B 01 FF 60 44") + 2);
+	//g_Input = **reinterpret_cast<CInput***>(FindPattern("client.dll", "8B 0D ? ? ? ? 8B 01 FF 60 44") + 2);
 
-	oGetRawMouseAccumulators = (GetRawMouseAccumulatorsFn)(FindPattern("inputsystem.dll", "55 8B EC 8B 45 08 8B 91 9C 11 00 00"));
-	oWindowProc = (WindowProcFn)(FindPattern("inputsystem.dll", "55 8B EC 83 EC 20 57"));
-	oGetAccumulatedMouseDeltasAndResetAccumulators = (GetAccumulatedMouseDeltasAndResetAccumulatorsFn)(FindPattern("client.dll", "55 8B EC 53 8B 5D 0C 56 8B F1 57"));
-	oControllerMove = (ControllerMoveFn)(FindPattern("client.dll", "55 8B EC 56 8B F1 57 8B 7D 0C 80 BE 8C 00 00 00 00"));
-	oIn_SetSampleTime = (In_SetSampleTimeFn)(FindPattern("client.dll", "55 8B EC F3 0F 10 45 08 F3 0F 11 41 1C"));
+	/*
+	This is kind of a hassle to find and I went a very round-about way for it.
+	- In client.dll:
+	  Find CInput::ActivateMouse() by searching for a call to the winapi SystemParametersInfoA.
+      (ActivateMouse() is probably the first function that references SystemParametersInfoA).
+	- At the bottom of ActivateMouse(): grab the `(**(code **)(*DAT_181074218 + 0x138))(DAT_181074218,local_res10,local_res8);`
+	  The DAT_181074218 is the g_InputSystem / `inputsystem` pointer.
+	    (Rename it to `g_InputSystem` because we're going to use it again to find GetAccumulatedMouseDeltasAndResetAccumulators()!)
+	  The 0x138 is the vtable byte offset. 0x138 / 8 = 39.
+	- In inputsystem.dll:
+	  Search for "CInputSystem::AttachToWindow: Cannot attach" to find CInputSystem::AttachToWindow().
+	  Use the references to AttachToWindow() to find the CInputSystem vtable.
+	- Go to the vtable[39] (40th) function and you should find GetRawMouseAccumulators. Hopefully.
+	*/
+	oGetRawMouseAccumulators = (GetRawMouseAccumulatorsFn)(FindPattern("inputsystem.dll", "8B 81 ? ? ? ? 89 02"));
+	/*
+	In client.dll:
+	Use the g_InputSystem value we found and then search for references where they use the vtable byte offset for GetRawMouseAccumulators() again!
+	It was one of the last references for me.
+	*/
+	/*
+	Also the call to GetAccumulatedMouseDeltasAndResetAccumulators that matters is inlined inside of CInput::MouseMove() so that's annoying....
 
+	*/
+	oGetAccumulatedMouseDeltasAndResetAccumulators = (GetAccumulatedMouseDeltasAndResetAccumulatorsFn)(FindPattern("client.dll", "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 41 ? 49 8B F8"));
+	// actually the instruction is a MOV here 😇
+	m_rawinput_cvar = (int*)((uintptr_t)AddrFromLea((uintptr_t)oGetAccumulatedMouseDeltasAndResetAccumulators + 35) + 0x20);
+	// TODO: This is AWFUL!!!! Will probably break one day... just use Safetyhook inline/mid-function hooks when that happens and hope for the best lol...
+	/*
+	Thunk:
+		push rcx
+		push rdx
+		push r8
+		push r9
+		push r10
+		push r11
+
+		push r15
+		mov r15, rsp
+
+		sub rsp, 64
+		and rsp, -32
+
+		lea rdx, [rsp+0]
+		lea r8, [rsp+16]
+
+		sub rsp, 32
+
+		mov rcx, rbx
+		mov rax, 0x1111111111111111
+		// rcx = this
+		// rdx = 'mx' address
+		// r8  = 'my' address
+		call rax
+
+		movss xmm8, [rsp+32]
+		movss xmm9, [rsp+48]
+
+		mov rsp, r15
+		pop r15
+
+		pop r11
+		pop r10
+		pop r9
+		pop r8
+		pop rdx
+		pop rcx
+	*/
+	char patch[89+1] = "\x51\x52\x41\x50\x41\x51\x41\x52\x41\x53\x41\x57\x49\x89\xE7\x48\x83\xEC\x40\x48\x83\xE4\xE0\x48\x8D\x14\x24\x4C\x8D\x44\x24\x10\x48\x83\xEC\x20\x48\x89\xD9\x48\xB8\x11\x11\x11\x11\x11\x11\x11\x11\xFF\xD0\xF3\x44\x0F\x10\x44\x24\x20\xF3\x44\x0F\x10\x4C\x24\x30\x4C\x89\xFC\x41\x5F\x41\x5B\x41\x5A\x41\x59\x41\x58\x5A\x59\x90\x90\x90\x90\x90\x90\x90\x90\x90";
+	*(void**)(patch + 41) = Hooked_GetAccumulatedMouseDeltasAndResetAccumulators;
+	char GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original[89]{};
+	auto GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove = (void*)FindPattern("client.dll", "48 8B 05 ? ? ? ? F3 44 0F 10 43");
+	DWORD GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_protect;
+	VirtualProtect(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove, sizeof(patch) - 1, PAGE_EXECUTE_READWRITE, &GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_protect);
+	memcpy(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original, GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove, sizeof(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original));
+	memcpy(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove, patch, sizeof(patch) - 1);
+	/*
+	In client.dll:
+	Find CInput::JoyStickMove() by searching for the FLOAT (f32!!!) 14000.0.
+	Go to function that calls JoyStickMove() and bam you're inside CInput::ControllerMove()!
+	*/
+	oControllerMove = (ControllerMoveFn)(FindPattern("client.dll", "48 89 5C 24 ? 57 48 83 EC 30 80 B9 ? ? ? ? 00 49 8B F8"));
+	/*
+	- Find CInput vtable with CInput::ActivateMouse() via winapi SystemParametersInfoA.
+	- Go up 2 functions in the table to find CInput::IN_SetSampleTime()
+	*/
+	//oIn_SetSampleTime = (In_SetSampleTimeFn)(FindPattern("client.dll", "cc f3 0f 11 49 ? c3 cc") + 1);
+	oIn_SetSampleTime = (In_SetSampleTimeFn)(FindPattern("client.dll", "f3 0f 11 49 20 c3"));
+#endif
+
+#if DO_FASTDL_THINGS
 	oCDownloadManager_UpdateProgressBar = (CDownloadManager_UpdateProgressBarFn)(FindPattern("engine.dll", "55 8B EC 81 EC 10 02 00 00 56"));
 	oCEngineVGui_UpdateCustomProgressBar = (CEngineVGui_UpdateCustomProgressBarFn)(FindPattern("engine.dll", "55 8B EC 81 EC 00 04 00 00 83 3D ? ? ? ? 00"));
 	oDownloadCache_PersistToDisk = (DownloadCache_PersistToDiskFn)(FindPattern("engine.dll", "55 8B EC 81 EC 08 02 00 00 53 8B D9"));
 	oDecompressBZipToDisk = (DecompressBZipToDiskFn)(FindPattern("engine.dll", "55 8B EC B8 14 03 01 00"));
 	oBZ2_bzread = (BZ2_bzreadFn)(FindPattern("engine.dll", "55 8B EC 8B 45 ? 83 B8 ? ? ? ? 04"));
-
-	oCHostState_OnClientConnected = (CHostState_OnClientConnectedFn)(FindPattern("engine.dll", "55 8B EC 83 EC 0C 56 8B F1 80 BE ? ? ? ? 00 0F 84"));
-
 	oCClientState_ProcessServerInfo = (CClientState_ProcessServerInfoFn)(FindPattern("engine.dll", "55 8B EC 56 57 8B F1 E8 ? ? ? ? 8B 7D"));
 	MD5_MapFile = (MD5_MapFileFn)(FindPattern("engine.dll", "55 8B EC 81 EC 6C 08 00 00"));
 	oCDownloadManager_Queue = (CDownloadManager_QueueFn)(FindPattern("engine.dll", "55 8B EC 51 53 8B 5D ? 56 8B F1 53"));
@@ -679,7 +808,8 @@ DWORD InjectionEntryPoint(DWORD processID)
 	};
 	*(void**)(shellcode + 3) = Hack_IsValidFileForTransfer_For_Periods_In_Bsp_Name;
 	memcpy(EndOf_IsValidFileForTransfer, shellcode, sizeof(shellcode));
-#endif
+#endif // HAXOR_BSP_PERIODS
+#endif // DO_FASTDL_THINGS
 
 #if 0
 	// This is used so `download_debug` will actually print the fucking messages!!!
@@ -692,58 +822,110 @@ DWORD InjectionEntryPoint(DWORD processID)
 #endif
 
 	uintptr_t tier = (uintptr_t)GetModuleHandleA("tier0.dll");
-	ConMsg = (ConMsgFn)(uintptr_t)GetProcAddress((HMODULE)tier, "?ConMsg@@YAXPBDZZ");
+	ConMsg = (ConMsgFn)(uintptr_t)GetProcAddress((HMODULE)tier, "?ConMsg@@YAXPEBDZZ");
+
+	// Search for "scripts/HudLayout.res" & get the function that's calling something with a "CHudChat" string at the top...
+	auto ClientModeShared_Init = FindPattern("client.dll", "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 30 48 8B F1 48 8D 15");
+	// imagine doing this instead of getting p_gClientMode & the m_pChatElement offset lol...
+	auto gHUD = AddrFromLea(ClientModeShared_Init + 25);
+	// search for "Could not find Hud Element: %s"
+	CHud_FindElement = (CHud_FindElementFn)FindPattern("client.dll", "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 33 DB 48 8B EA 48 8B F9 39 59");
+	// look for the function that uses "Console"
+	CBaseHudChat_ChatPrintf = (CBaseHudChat_ChatPrintfFn)FindPattern("client.dll", "4C 89 4C 24 ? 48 89 4C 24 ? 55 53");
+
+
+#if DO_RAWINPUT2
 	Plat_FloatTime = (Plat_FloatTimeFn)(uintptr_t)GetProcAddress((HMODULE)tier, "Plat_FloatTime");
+#endif
 
 	//ConMsg("Plat_FloatTime: %.5f\n", Plat_FloatTime());
 
 	BYTE nopBuffer[6] = { 0x90,0x90,0x90,0x90,0x90,0x90 };
 	BYTE jumpPredOriginalBytes[6];
-	auto jumpPred = reinterpret_cast<void*>(FindPattern("client.dll", "85 C0 8B 46 08 0F 84 ? FF FF FF F6 40 28 02 0F 85 ? FF FF FF") + 15);
-	memcpy(jumpPredOriginalBytes, jumpPred, 6);
+	// Search for float64 (DOUBLE!!) 301.993377410829964447 to find the place where sv_autobunnyhopping & the `// don't pogo stick` if-statment used to be...
+	// Might be easier to follow the sv_autobunnyhopping cvar than this f64 but whatever...
+	//  then sig the `TEST byte ptr [REGISTER + 0xOFFSET], 0x2` instruction.
+	auto jumpPred = reinterpret_cast<void*>(FindPattern("client.dll", "F6 40 ? 02 75 ? 48 8B 05"));
+	ConMsg("jumpPred = 0x%llx\n", jumpPred);
+	memcpy(jumpPredOriginalBytes, jumpPred, sizeof(jumpPredOriginalBytes));
 	DWORD jumpPredOriginalProtect;
-	VirtualProtect(jumpPred, 6, PAGE_EXECUTE_READWRITE, &jumpPredOriginalProtect);
-	memcpy(jumpPred, nopBuffer, 6);
+	VirtualProtect(jumpPred, sizeof(jumpPredOriginalBytes), PAGE_EXECUTE_READWRITE, &jumpPredOriginalProtect);
+	//memcpy(jumpPred, nopBuffer, sizeof(nopBuffer));
 
-	auto pReleaseVideo = reinterpret_cast<void*>(FindPattern("engine.dll", "56 8B F1 8B 06 8B 40 ? FF D0 84 C0 75 ? 8B 06") + 12);
-	auto pFUCKD3D9 = reinterpret_cast<void*>(FindPattern("d3d9.dll", "0F 84 ? ? ? ? 6A 07 FF B3"));
-	DWORD pReleaseVideoOriginalProtect, pFUCKD3D9OriginalProtect;
+#if DO_FULLSCREEN_PATCH
+	// Search for `ShowWindow(hwnd,6);` (SW_MINIMIZE) call to find CVideoMode_MaterialSystem::ReleaseVideo() (with an inlined ReleaseFullScreen).
+	// Add X bytes to get to the first JNZ...
+	auto pReleaseVideo = (void*)(FindPattern("engine.dll", "40 53 48 83 EC 20 48 8B 01 48 8B D9 FF 90 ? ? ? ? 84 C0 75 ? 48 8B 03 48 8B CB 48 83 C4 20 5B 48 FF A0 ? ? ? ? 48 83 C4 20 5B C3") + 20);
+	DWORD pReleaseVideoOriginalProtect;
 	VirtualProtect(pReleaseVideo, 1, PAGE_EXECUTE_READWRITE, &pReleaseVideoOriginalProtect);
+	/*
+	Find this (by searching for the ShowWindow(hwnd,7) call):
+		if (((*(uint *)(*(longlong *)(param_1 + 0x10) + 0x78) & 0x800) == 0) && (param_2 != 0)) {
+		  DAT_1801b9348 = DAT_1801b9348 | 0x40;
+		  FUN_180007828(param_1);
+		  BVar4 = IsWindowVisible(*(HWND *)(param_1 + 0x1d8));
+		  if ((BVar4 != 0) && (bVar2)) {
+			ShowWindow(*(HWND *)(param_1 + 0x1d8),7);
+		  }
+		  DAT_1801b9348 = DAT_1801b9348 & 0xffffffbf;
+		}
+	And get the sig of the jz instruction around the ShowWindow(hwnd,7) call.
+	*/
+	auto pFUCKD3D9 = (void*)FindPattern("d3d9.dll", "0F 84 ? ? ? ? 48 8B 8B ? ? ? ? BA 07 00 00 00");
+	DWORD pFUCKD3D9OriginalProtect;
 	VirtualProtect(pFUCKD3D9, 2, PAGE_EXECUTE_READWRITE, &pFUCKD3D9OriginalProtect);
+#endif
 
-	BYTE prleNew[6] = { 0x5e,   0x5f,   0x5d,   0xc2, 0x04, 0x00 }; // pop esi ; pop edi ; pop ebp ; ret 0x4
-	BYTE prleOriginal[6];
-	auto pFuckPlayerRoughLandingEffects = reinterpret_cast<void*>(FindPattern("client.dll", "55 8B EC F3 0F 10 45 ? 0F 2F 05 ? ? ? ? 57") + 73 /* after ->PlayStepSound */);
-	memcpy(prleOriginal, pFuckPlayerRoughLandingEffects, 6);
+#if DO_VIEWPUNCH_PATCH
+	BYTE prleNew[6] = { 0x48, 0x83, 0xc4, 0x40,    0x5f,    0xc3 }; // add rsp, 0x40 ; pop rdi ; ret
+	BYTE prleOriginal[6]{};
+	// Search for the DOUBLE (f64!!!) 0.013 and then go to the function that references it.
+	auto pFuckPlayerRoughLandingEffects = reinterpret_cast<void*>(FindPattern("client.dll", "40 57 48 83 EC 40 0F 57 C0") + 84 /* after ->PlayStepSound */);
+	memcpy(prleOriginal, pFuckPlayerRoughLandingEffects, sizeof(prleOriginal));
 	DWORD pFuckPlayerRoughtLandingEffectsOriginalProtect;
-	VirtualProtect(pFuckPlayerRoughLandingEffects, 2, PAGE_EXECUTE_READWRITE, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
-	memcpy(pFuckPlayerRoughLandingEffects, prleNew, 6);
-	auto m_vecPunchAngle_RecvProp = (void**)((DWORD)GetModuleHandleA("client.dll") + 0x4c8c40);
-	auto m_vecPunchAngle_RecvProp_Original = m_vecPunchAngle_RecvProp[8];
-	m_vecPunchAngle_RecvProp[8] = RecvProxy_ZeroToVector;
+	VirtualProtect(pFuckPlayerRoughLandingEffects, sizeof(prleOriginal), PAGE_EXECUTE_READWRITE, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
+	memcpy(pFuckPlayerRoughLandingEffects, prleNew, sizeof(prleNew));
+	/*
+	Search for "m_vecPunchAngle" to find the DT_Local init function.
+	   1801ecd70 48 8d 15        LEA        RDX,[s_m_vecPunchAngle_180b04698]                = "m_vecPunchAngle"
+				 21 79 91 00
+	   1801ecd77 48 8d 0d        LEA        RCX,[RecvProp_m_vecPunchAngle]
+				 32 4b e7 00
+	   1801ecd7e e8 cd 59        CALL       FUN_180262750                                    undefined FUN_180262750(undefine
+				 07 00
+	Grab the instruction-signature of the second LEA
+	*/
+	auto m_vecPunchAngle_RecvProp = (void**)AddrFromLea(FindPattern("client.dll", "48 8D 0D ? ? ? ? E8 ? ? ? ? 44 8D 4E ? 48 89 7C 24 ? 41 B8 D0 00 00 00"));
+	auto m_vecPunchAngle_RecvProp_Original = m_vecPunchAngle_RecvProp[6];
+	m_vecPunchAngle_RecvProp[6] = RecvProxy_ZeroToVector;
+#endif
 
 	DetourTransactionBegin();
 	DetourUpdateThread(GetCurrentThread());
-	DetourAttach(&(PVOID&)oGetRawMouseAccumulators, Hooked_GetRawMouseAccumulators);
+	DetourAttach(&(PVOID&)oCHostState_OnClientConnected, Hooked_CHostState_OnClientConnected);
 	DetourAttach(&(PVOID&)oWindowProc, Hooked_WindowProc);
+#if DO_RAWINPUT2
+	DetourAttach(&(PVOID&)oGetRawMouseAccumulators, Hooked_GetRawMouseAccumulators);
 	DetourAttach(&(PVOID&)oGetAccumulatedMouseDeltasAndResetAccumulators, Hooked_GetAccumulatedMouseDeltasAndResetAccumulators);
 	DetourAttach(&(PVOID&)oControllerMove, Hooked_ControllerMove);
 	DetourAttach(&(PVOID&)oIn_SetSampleTime, Hooked_IN_SetSampleTime);
+#endif
+#if DO_FASTDL_THINGS
 	DetourAttach(&(PVOID&)oCEngineVGui_UpdateCustomProgressBar, Hooked_CEngineVGui_UpdateCustomProgressBar);
 	DetourAttach(&(PVOID&)oCDownloadManager_UpdateProgressBar, Hooked_CDownloadManager_UpdateProgressBar);
 	DetourAttach(&(PVOID&)oDownloadCache_PersistToDisk, Hooked_DownloadCache_PersistToDisk);
 	DetourAttach(&(PVOID&)oDecompressBZipToDisk, Hooked_DecompressBZipToDisk);
 	DetourAttach(&(PVOID&)oBZ2_bzread, Hooked_BZ2_bzread);
-	DetourAttach(&(PVOID&)oCHostState_OnClientConnected, Hooked_CHostState_OnClientConnected);
 	DetourAttach(&(PVOID&)oCClientState_ProcessServerInfo, Hooked_CClientState_ProcessServerInfo);
 	DetourAttach(&(PVOID&)oCDownloadManager_Queue, Hooked_CDownloadManager_Queue);
 	DetourAttach(&(PVOID&)oCDownloadManager_CheckActiveDownload, Hooked_CDownloadManager_CheckActiveDownload);
 	//DetourAttach(&(PVOID&)oCDownloadManager_QueueInternal, Hooked_CDownloadManager_QueueInternal);
 	//DetourAttach(&(PVOID&)oC_SoundscapeSystem_Init, Hooked_C_SoundscapeSystem_Init);
 	DetourAttach(&(PVOID&)oCHLClient_LevelInitPreEntity, Hooked_CHLClient_LevelInitPreEntity);
+#endif
 	DetourTransactionCommit();
 
-	bool jumpPredPatched = true;
+	bool jumpPredPatched = false;
 	bool fullScreenPatched = false;
 	bool fuckViewpunch = true;
 
@@ -758,12 +940,13 @@ DWORD InjectionEntryPoint(DWORD processID)
 			if (msg.message == WM_HOTKEY && msg.wParam == 1)
 			{
 				if (jumpPredPatched)
-					memcpy(jumpPred, jumpPredOriginalBytes, 6);
+					memcpy(jumpPred, jumpPredOriginalBytes, sizeof(jumpPredOriginalBytes));
 				else
-					memcpy(jumpPred, nopBuffer, 6);
+					memcpy(jumpPred, nopBuffer, sizeof(nopBuffer));
 				jumpPredPatched = !jumpPredPatched;
-				ConMsg("BunnyhopAPE: %d\n", jumpPredPatched);
+				CBaseHudChat_ChatPrintf(CHud_FindElement((void*)gHUD, "CHudChat"), 0, 0, "BunnyhopAPE: %d", jumpPredPatched);
 			}
+#if DO_FULLSCREEN_PATCH
 			else if (msg.message == WM_HOTKEY && msg.wParam == 2)
 			{
 				if (fullScreenPatched)
@@ -777,42 +960,58 @@ DWORD InjectionEntryPoint(DWORD processID)
 					memcpy(pFUCKD3D9, "\x90\xE9", 2);
 				}
 				fullScreenPatched = !fullScreenPatched;
-				ConMsg("Fullscreen hook: %d\n", fullScreenPatched);
+				CBaseHudChat_ChatPrintf(CHud_FindElement((void*)gHUD, "CHudChat"), 0, 0, "Fullscreen hook: %d", fullScreenPatched);
 			}
+#endif
+#if DO_VIEWPUNCH_PATCH
 			else if (msg.message == WM_HOTKEY && msg.wParam == 3)
 			{
 				if (fuckViewpunch) {
-					memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, 6);
-					m_vecPunchAngle_RecvProp[8] = m_vecPunchAngle_RecvProp_Original;
+					memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, sizeof(prleOriginal));
+					m_vecPunchAngle_RecvProp[6] = m_vecPunchAngle_RecvProp_Original;
 				} else {
-					memcpy(pFuckPlayerRoughLandingEffects, prleNew, 6);
-					m_vecPunchAngle_RecvProp[8] = RecvProxy_ZeroToVector;
+					memcpy(pFuckPlayerRoughLandingEffects, prleNew, sizeof(prleOriginal));
+					m_vecPunchAngle_RecvProp[6] = RecvProxy_ZeroToVector;
 				}
 				fuckViewpunch = !fuckViewpunch;
-				ConMsg("Viewpunch: %d\n", !fuckViewpunch);
+				CBaseHudChat_ChatPrintf(CHud_FindElement((void*)gHUD, "CHudChat"), 0, 0, "Viewpunch: %s", fuckViewpunch ? "BLOCKED" : "YES");
 			}
+#endif
 		}
 
 		//Sleep(55);
 	}
 
-	memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, 6);
+#if DO_RAWINPUT2
+	VirtualProtect(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove, sizeof(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original) - 1, GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_protect, &GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_protect);
+	memcpy(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove, GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original, sizeof(GetAccumulatedMouseDeltasAndResetAccumulators_inside_MouseMove_original) - 1);
+#endif
+
+#if DO_VIEWPUNCH_PATCH
+	memcpy(pFuckPlayerRoughLandingEffects, prleOriginal, sizeof(prleOriginal));
 	m_vecPunchAngle_RecvProp[8] = m_vecPunchAngle_RecvProp_Original;
-	VirtualProtect(pFuckPlayerRoughLandingEffects, 6, pFuckPlayerRoughtLandingEffectsOriginalProtect, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
+	VirtualProtect(pFuckPlayerRoughLandingEffects, sizeof(prleOriginal), pFuckPlayerRoughtLandingEffectsOriginalProtect, &pFuckPlayerRoughtLandingEffectsOriginalProtect);
+#endif
+#if DO_FULLSCREEN_PATCH
 	memcpy(pReleaseVideo, "\x75", 1);
 	memcpy(pFUCKD3D9, "\x0F\x84", 2);
 	VirtualProtect(pReleaseVideo, 1, pReleaseVideoOriginalProtect, &pReleaseVideoOriginalProtect);
 	VirtualProtect(pFUCKD3D9, 2, pFUCKD3D9OriginalProtect, &pFUCKD3D9OriginalProtect);
-	memcpy(jumpPred, jumpPredOriginalBytes, 6);
-	VirtualProtect(jumpPred, 6, jumpPredOriginalProtect, &jumpPredOriginalProtect);
+#endif
+	memcpy(jumpPred, jumpPredOriginalBytes, sizeof(jumpPredOriginalBytes));
+	VirtualProtect(jumpPred, sizeof(jumpPredOriginalBytes), jumpPredOriginalProtect, &jumpPredOriginalProtect);
 
 	DetourTransactionBegin();
 	DetourUpdateThread(GetCurrentThread());
+	DetourDetach(&(PVOID&)oCHostState_OnClientConnected, Hooked_CHostState_OnClientConnected);
+#if DO_RAWINPUT2
 	DetourDetach(&(PVOID&)oGetRawMouseAccumulators, Hooked_GetRawMouseAccumulators);
 	DetourDetach(&(PVOID&)oWindowProc, Hooked_WindowProc);
 	DetourDetach(&(PVOID&)oGetAccumulatedMouseDeltasAndResetAccumulators, Hooked_GetAccumulatedMouseDeltasAndResetAccumulators);
 	DetourDetach(&(PVOID&)oControllerMove, Hooked_ControllerMove);
 	DetourDetach(&(PVOID&)oIn_SetSampleTime, Hooked_IN_SetSampleTime);
+#endif
+#if DO_FASTDL_THINGS
 	// The game would crash when trying to spawn in after joining.
 	// But only when these DetourDetach() calls were here.
 	// It was CEngine... & the Decompress... one I believe...
@@ -823,13 +1022,13 @@ DWORD InjectionEntryPoint(DWORD processID)
 	DetourDetach(&(PVOID&)oDownloadCache_PersistToDisk, Hooked_DownloadCache_PersistToDisk);
 	DetourDetach(&(PVOID&)oDecompressBZipToDisk, Hooked_DecompressBZipToDisk);
 	DetourDetach(&(PVOID&)oBZ2_bzread, Hooked_BZ2_bzread);
-	DetourDetach(&(PVOID&)oCHostState_OnClientConnected, Hooked_CHostState_OnClientConnected);
 	DetourDetach(&(PVOID&)oCClientState_ProcessServerInfo, Hooked_CClientState_ProcessServerInfo);
 	DetourDetach(&(PVOID&)oCDownloadManager_Queue, Hooked_CDownloadManager_Queue);
 	DetourDetach(&(PVOID&)oCDownloadManager_CheckActiveDownload, Hooked_CDownloadManager_CheckActiveDownload);
 	//DetourDetach(&(PVOID&)oCDownloadManager_QueueInternal, Hooked_CDownloadManager_QueueInternal);
 	//DetourDetach(&(PVOID&)oC_SoundscapeSystem_Init, Hooked_C_SoundscapeSystem_Init);
 	DetourDetach(&(PVOID&)oCHLClient_LevelInitPreEntity, Hooked_CHLClient_LevelInitPreEntity);
+#endif
 	DetourTransactionCommit();
 
 	ExitThread(0);
@@ -897,7 +1096,7 @@ std::string ReplaceString(std::string subject, const std::string& search,
 std::string GetSteamPath()
 {
 	HKEY key;
-	RegOpenKeyA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Valve\\Steam", &key);
+	RegOpenKeyA(HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Valve\\Steam", &key);
 	char buf[256];
 	DWORD size = sizeof(buf) / sizeof(buf[0]);
 	RegQueryValueExA(key, "InstallPath", 0, NULL, (BYTE*)buf, &size);
@@ -917,6 +1116,7 @@ std::string GetCSSPath(std::string const & steampath)
 			library_path = line.substr(sizeof(PPPPP) - 1, line.size() - sizeof(PPPPP));
 			library_path = ReplaceString(library_path, "\\\\", "\\");
 		}
+
 		if (line.rfind("\t\t\t\"240\"", 0) == 0)
 		{
 			css_path = library_path;
@@ -956,7 +1156,7 @@ std::string GetCSSLaunchOptions(std::string const & steampath, std::string const
 			line = ReplaceString(line, "\\\\", "\\");
 			return line;
 		}
-#if 1
+#if 0
 		// You're not going to believe it but this section is required to not crash when spawning in.
 		for (int i = 0; i < 5; i++)
 			(void)GetCurrentProcessId();
@@ -968,9 +1168,12 @@ std::string GetCSSLaunchOptions(std::string const & steampath, std::string const
 //Сredits: https://github.com/alkatrazbhop/BunnyhopAPE
 int main()
 {
-	SetConsoleTitle("RawInput2BunnyhopAPE");
+	SetConsoleTitle("RawInput2BunnyhopAPE x64");
+	printf("https://github.com/rtldg/RawInput2BunnyhopAPE\n\n");
 
+#if DO_FASTDL_THINGS
 	DownloadLumpChecksums();
+#endif
 
 	//printf("%d\n", &(((struct request_t*)0)->total));
 
@@ -979,11 +1182,11 @@ int main()
 	auto steam_path = GetSteamPath();
 	printf("steampath = %s\n", steam_path.c_str());
 	auto launch_options = GetCSSLaunchOptions(steam_path, steamid3);
-	launch_options = "-steam -game cstrike -insecure -novid -console   " + launch_options;
+	launch_options = "-insecure -novid -console   " + launch_options;
 	printf("launchopt = %s\n", launch_options.c_str());
 	auto css_path = GetCSSPath(steam_path);
 	printf("css path  = %s\n\n", css_path.c_str());
-	auto css_exe = css_path + "hl2.exe";
+	auto css_exe = css_path + "cstrike_win64.exe";
 
 	PROCESS_INFORMATION pi = {};
 	STARTUPINFOA si = {};
@@ -1009,7 +1212,7 @@ int main()
 
 	while (1)
 	{
-		DWORD pClient = (DWORD)GetModuleHandleExtern(pi.dwProcessId, "client.dll");
+		auto pClient = GetModuleHandleExtern(pi.dwProcessId, "client.dll");
 		if (pClient) break;
 		Sleep(1000);
 		DWORD exitcode;
@@ -1018,7 +1221,7 @@ int main()
 	}
 
 	//system("cls");
-	printf("Set \"m_rawinput 2\" in game for it to take effect\n\nPress F5 to toggle BunnyhopAPE autobhop prediction (on by default)\nPress F6 to toggle the fullscreen hook (you probably don't want this)\nPress F7 to toggle the viewpunch remover (e.g. from fall-damage) (on by default)\n");
+	printf("Set \"m_rawinput 2\" in game for it to take effect\n\nPress F5 to toggle BunnyhopAPE autobhop prediction (OFF by default)\n    (you shouldn't need this now that bhoptimer supports sv_autobunnyhopping)\nPress F6 to toggle the fullscreen hook (you probably don't want this)\nPress F7 to toggle the viewpunch remover (e.g. from fall-damage) (on by default)\n");
 
 	PEInjector(pi.hProcess, InjectionEntryPoint);
 
