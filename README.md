@@ -1,7 +1,8 @@
 # NO-MAINTENANCE NOTE
 I'm not going to update this when it breaks. Consider these options (which include lagfix) someday:
-- Linux https://github.com/dowoge/RawInput2BunnyhopAPE/tree/linux
-- Windows https://github.com/bhopbhopbhop/RawInput2BunnyhopAPE-lagfix/releases
+- https://github.com/ddyfad/bhoptools (windows & linux)
+- https://github.com/dowoge/RawInput2BunnyhopAPE/tree/linux (linux only)
+- https://github.com/bhopbhopbhop/RawInput2BunnyhopAPE-lagfix/releases (windows only)
 
 Something something not an endorsement, something something run random .exe's at your own risk.
 
